@@ -26,6 +26,12 @@ export default function ComparisonTab() {
     if (!styleMap[p.style_num]) styleMap[p.style_num] = { style_num: p.style_num, description: p.description, packaging: p.packaging, factories: {} };
     styleMap[p.style_num].factories[p.factory_name] = p;
   }
+
+  // lowest MOQ per style across all factories
+  function lowestMoq(row) {
+    const moqs = Object.values(row.factories).map(p => p.moq).filter(Boolean);
+    return moqs.length ? Math.min(...moqs) : null;
+  }
   const styles = Object.values(styleMap);
   const factories = [...new Set(products.map(p => p.factory_name))].sort();
 
@@ -98,6 +104,7 @@ export default function ComparisonTab() {
                 <th style={s.th}>Style #</th>
                 <th style={s.th}>Description</th>
                 <th style={s.th}>Packaging</th>
+                <th style={s.th}>MOQ</th>
                 {factories.map((f, i) => {
                   const tint = FACTORY_TINTS[i % FACTORY_TINTS.length];
                   return <th key={f} style={{ ...s.th, background: tint.header, borderTop: `3px solid ${tint.header.replace('ff', 'cc')}` }}>{f}</th>;
@@ -116,6 +123,7 @@ export default function ComparisonTab() {
                     <td style={s.td}><strong>{row.style_num}</strong></td>
                     <td style={s.td}>{row.description}</td>
                     <td style={s.td}>{row.packaging}</td>
+                    <td style={{ ...s.td, textAlign: 'center' }}>{lowestMoq(row)?.toLocaleString() ?? '—'}</td>
                     {factories.map((f, i) => {
                       const p = row.factories[f];
                       const price = p?.price;
