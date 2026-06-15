@@ -3,31 +3,24 @@ import api from '../utils/api';
 
 export default function ComparisonTab() {
   const [submissions, setSubmissions] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState('');
   const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [aiSummary, setAiSummary] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
-    api.get('/projects').then(r => setProjects(r.data)).catch(() => {});
-    api.get('/submissions').then(r => setSubmissions(r.data)).catch(() => {});
+    api.get('/submissions').then(r => setSubmissions(r.data)).catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    if (!selectedProject) { setProducts([]); return; }
+    if (!submissions.length) { setLoading(false); return; }
     setLoading(true);
-    const subs = submissions.filter(s => String(s.project_id) === String(selectedProject) && s.status !== 'rejected');
+    const subs = submissions.filter(s => s.status !== 'rejected');
     Promise.all(subs.map(s => api.get(`/submissions/${s.id}/products`).then(r => r.data)))
-      .then(results => {
-        setProducts(results.flat());
-        setLoading(false);
-      })
+      .then(results => { setProducts(results.flat()); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [selectedProject, submissions]);
+  }, [submissions]);
 
-  // Group by style_num
   const styleMap = {};
   for (const p of products) {
     if (!styleMap[p.style_num]) styleMap[p.style_num] = { style_num: p.style_num, description: p.description, packaging: p.packaging, factories: {} };
@@ -36,11 +29,24 @@ export default function ComparisonTab() {
   const styles = Object.values(styleMap);
   const factories = [...new Set(products.map(p => p.factory_name))].sort();
 
-  function cellColor(price, lowestPrice) {
-    if (!price || !lowestPrice) return {};
-    if (price === lowestPrice) return { background: '#fefce8', color: '#854d0e', fontWeight: 700 }; // yellow = lowest
-    if (price <= lowestPrice * 1.10) return { background: '#f0fdf4', color: '#166534' }; // green = competitive
-    return { background: '#fef2f2', color: '#991b1b' }; // red = too high
+  // Soft distinct column tints — one per factory, cycling
+  const FACTORY_TINTS = [
+    { header: '#bfdbfe', cell: '#dbeafe' }, // blue
+    { header: '#e9d5ff', cell: '#f3e8ff' }, // purple
+    { header: '#fed7aa', cell: '#ffedd5' }, // orange
+    { header: '#99f6e4', cell: '#ccfbf1' }, // teal
+    { header: '#fde68a', cell: '#fef9c3' }, // yellow
+    { header: '#fbcfe8', cell: '#fce7f3' }, // pink
+    { header: '#a7f3d0', cell: '#d1fae5' }, // green
+    { header: '#e2e8f0', cell: '#f1f5f9' }, // gray
+  ];
+
+  function cellColor(price, lowestPrice, tintCell) {
+    if (!price) return { background: tintCell };
+    if (!lowestPrice) return { background: tintCell };
+    if (price === lowestPrice) return { background: '#fefce8', color: '#854d0e', fontWeight: 700 };
+    if (price <= lowestPrice * 1.10) return { background: '#f0fdf4', color: '#166534' };
+    return { background: '#fef2f2', color: '#991b1b' };
   }
 
   async function getAiSummary() {
@@ -60,17 +66,11 @@ export default function ComparisonTab() {
     <div>
       <div style={s.topBar}>
         <h2 style={s.title}>Factory Comparison</h2>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select style={s.select} value={selectedProject} onChange={e => setSelectedProject(e.target.value)}>
-            <option value="">Select Project</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          {products.length > 0 && (
-            <button style={s.aiBtn} onClick={getAiSummary} disabled={aiLoading}>
-              {aiLoading ? 'Analyzing...' : 'AI Summary'}
-            </button>
-          )}
-        </div>
+        {products.length > 0 && (
+          <button style={s.aiBtn} onClick={getAiSummary} disabled={aiLoading}>
+            {aiLoading ? 'Analyzing...' : 'AI Summary'}
+          </button>
+        )}
       </div>
 
       {aiSummary && (
@@ -86,12 +86,10 @@ export default function ComparisonTab() {
         <span style={{ ...s.dot, background: '#fef2f2', border: '1px solid #fca5a5', marginLeft: 12 }} /> Too High
       </div>
 
-      {!selectedProject ? (
-        <div style={s.empty}>Select a project to see comparison.</div>
-      ) : loading ? (
+      {loading ? (
         <div style={s.empty}>Loading...</div>
       ) : styles.length === 0 ? (
-        <div style={s.empty}>No approved submissions for this project.</div>
+        <div style={s.empty}>No submissions yet. Upload factory quote sheets from the Submissions tab.</div>
       ) : (
         <div style={{ overflowX: 'auto', background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0' }}>
           <table style={s.table}>
@@ -100,7 +98,10 @@ export default function ComparisonTab() {
                 <th style={s.th}>Style #</th>
                 <th style={s.th}>Description</th>
                 <th style={s.th}>Packaging</th>
-                {factories.map(f => <th key={f} style={s.th}>{f}</th>)}
+                {factories.map((f, i) => {
+                  const tint = FACTORY_TINTS[i % FACTORY_TINTS.length];
+                  return <th key={f} style={{ ...s.th, background: tint.header, borderTop: `3px solid ${tint.header.replace('ff', 'cc')}` }}>{f}</th>;
+                })}
                 <th style={{ ...s.th, background: '#fefce8' }}>Lowest Bid</th>
                 <th style={{ ...s.th, background: '#f0fdf4' }}>Target +10%</th>
               </tr>
@@ -115,13 +116,14 @@ export default function ComparisonTab() {
                     <td style={s.td}><strong>{row.style_num}</strong></td>
                     <td style={s.td}>{row.description}</td>
                     <td style={s.td}>{row.packaging}</td>
-                    {factories.map(f => {
+                    {factories.map((f, i) => {
                       const p = row.factories[f];
                       const price = p?.price;
-                      const cs = cellColor(price, lowest);
+                      const tint = FACTORY_TINTS[i % FACTORY_TINTS.length];
+                      const cs = cellColor(price, lowest, tint.cell);
                       return (
                         <td key={f} style={{ ...s.td, ...cs }}>
-                          {price ? `$${Number(price).toFixed(2)}` : '—'}
+                          {price ? `$${Number(price).toFixed(2)}` : <span style={{ color: '#cbd5e1' }}>—</span>}
                         </td>
                       );
                     })}

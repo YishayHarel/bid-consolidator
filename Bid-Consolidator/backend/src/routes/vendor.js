@@ -4,6 +4,7 @@ const path = require('path');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { parseExcel } = require('../utils/parseExcel');
+const { organizeFile } = require('../utils/organizeFile');
 
 const router = express.Router();
 
@@ -86,32 +87,70 @@ router.get('/validate/:token', async (req, res) => {
   }
 });
 
-// Public: vendor upload
+// Public: open upload (no token — factory provides their own name)
+router.post('/submit-open', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const factory_name = (req.body.factory_name || '').trim();
+  if (!factory_name) return res.status(400).json({ error: 'Factory name is required' });
+
+  try {
+    const parsed = parseExcel(req.file.path);
+    const { folder, destPath } = await organizeFile(req.file.path, parsed, req.file.originalname);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const subResult = await client.query(
+        `INSERT INTO submissions (factory_name, division, file_name, file_path, file_size, status, notes)
+         VALUES ($1, $2, $3, $4, $5, 'pending', $6) RETURNING *`,
+        [factory_name, parsed.division, req.file.originalname, destPath, req.file.size, `Folder: ${folder}`]
+      );
+      const submission = subResult.rows[0];
+      for (const p of parsed.products) {
+        await client.query(
+          `INSERT INTO products (submission_id, factory_name, style_num, factory_style, description, packaging, moq, price, container_units, category, color)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [submission.id, factory_name, p.style_num, p.factory_style, p.description, p.packaging, p.moq, p.price, p.container_units, p.category, p.color]
+        );
+      }
+      await client.query('COMMIT');
+      if (req.app.locals.broadcast) req.app.locals.broadcast({ type: 'submission:new', submission });
+      res.json({ success: true, factory_name, product_count: parsed.products.length, folder });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to process submission' });
+  }
+});
+
+// Public: token upload
 router.post('/submit/:token', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
   try {
-    const tokenRes = await pool.query(
-      'SELECT * FROM vendor_tokens WHERE token = $1',
-      [req.params.token]
-    );
+    const tokenRes = await pool.query('SELECT * FROM vendor_tokens WHERE token = $1', [req.params.token]);
     const t = tokenRes.rows[0];
     if (!t) return res.status(404).json({ error: 'Invalid token' });
     if (t.used_at) return res.status(400).json({ error: 'Token already used' });
     if (new Date(t.expires_at) < new Date()) return res.status(400).json({ error: 'Token expired' });
 
     const parsed = parseExcel(req.file.path);
+    const { folder, destPath } = await organizeFile(req.file.path, parsed, req.file.originalname);
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-
       const subResult = await client.query(
-        `INSERT INTO submissions (factory_name, project_id, division, file_name, file_path, file_size, status, token_id)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7) RETURNING *`,
-        [t.factory_name, t.project_id, parsed.division, req.file.originalname, req.file.path, req.file.size, t.id]
+        `INSERT INTO submissions (factory_name, project_id, division, file_name, file_path, file_size, status, token_id, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8) RETURNING *`,
+        [t.factory_name, t.project_id, parsed.division, req.file.originalname, destPath, req.file.size, t.id, `Folder: ${folder}`]
       );
       const submission = subResult.rows[0];
-
       for (const p of parsed.products) {
         await client.query(
           `INSERT INTO products (submission_id, factory_name, style_num, factory_style, description, packaging, moq, price, container_units, category, color)
@@ -119,19 +158,10 @@ router.post('/submit/:token', upload.single('file'), async (req, res) => {
           [submission.id, t.factory_name, p.style_num, p.factory_style, p.description, p.packaging, p.moq, p.price, p.container_units, p.category, p.color]
         );
       }
-
-      await client.query(
-        'UPDATE vendor_tokens SET used_at = NOW() WHERE id = $1',
-        [t.id]
-      );
-
+      await client.query('UPDATE vendor_tokens SET used_at = NOW() WHERE id = $1', [t.id]);
       await client.query('COMMIT');
-
-      if (req.app.locals.broadcast) {
-        req.app.locals.broadcast({ type: 'submission:new', submission });
-      }
-
-      res.json({ success: true, factory_name: t.factory_name, product_count: parsed.products.length });
+      if (req.app.locals.broadcast) req.app.locals.broadcast({ type: 'submission:new', submission });
+      res.json({ success: true, factory_name: t.factory_name, product_count: parsed.products.length, folder });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

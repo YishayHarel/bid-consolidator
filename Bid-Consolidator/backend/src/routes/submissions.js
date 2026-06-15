@@ -4,6 +4,7 @@ const path = require('path');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { parseExcel } = require('../utils/parseExcel');
+const { organizeFile } = require('../utils/organizeFile');
 
 const router = express.Router();
 
@@ -113,17 +114,18 @@ router.patch('/products/:productId/landed-cost', async (req, res) => {
 
 router.post('/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  const { project_id } = req.body;
 
   try {
     const parsed = parseExcel(req.file.path);
+    const { folder, destPath } = await organizeFile(req.file.path, parsed, req.file.originalname);
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const subResult = await client.query(
-        `INSERT INTO submissions (factory_name, project_id, division, file_name, file_path, file_size, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING *`,
-        [parsed.factoryName || req.file.originalname, project_id || null, parsed.division, req.file.originalname, req.file.path, req.file.size]
+        `INSERT INTO submissions (factory_name, division, file_name, file_path, file_size, status, notes)
+         VALUES ($1, $2, $3, $4, $5, 'pending', $6) RETURNING *`,
+        [parsed.factoryName || req.file.originalname, parsed.division, req.file.originalname, destPath, req.file.size, `Folder: ${folder}`]
       );
       const submission = subResult.rows[0];
 
@@ -136,12 +138,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       }
 
       await client.query('COMMIT');
-
-      if (req.app.locals.broadcast) {
-        req.app.locals.broadcast({ type: 'submission:new', submission });
-      }
-
-      res.status(201).json({ submission, productCount: parsed.products.length });
+      if (req.app.locals.broadcast) req.app.locals.broadcast({ type: 'submission:new', submission });
+      res.status(201).json({ submission, productCount: parsed.products.length, folder });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

@@ -33,24 +33,20 @@ Shalom International Sourcing Team`;
 
 export default function DraftEmailsTab() {
   const [submissions, setSubmissions] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState('');
   const [emails, setEmails] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState({});
 
   useEffect(() => {
-    api.get('/projects').then(r => setProjects(r.data)).catch(() => {});
-    api.get('/submissions').then(r => setSubmissions(r.data)).catch(() => {});
+    api.get('/submissions').then(r => setSubmissions(r.data)).catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    if (!selectedProject) { setEmails([]); return; }
+    if (!submissions.length) { setLoading(false); return; }
     setLoading(true);
-    const subs = submissions.filter(s => String(s.project_id) === String(selectedProject) && s.status !== 'rejected');
+    const subs = submissions.filter(s => s.status !== 'rejected');
     Promise.all(subs.map(s => api.get(`/submissions/${s.id}/products`).then(r => ({ factory: s.factory_name, products: r.data }))))
       .then(results => {
-        // Build lowest bid per style
         const styleLowest = {};
         for (const { products } of results) {
           for (const p of products) {
@@ -78,7 +74,7 @@ export default function DraftEmailsTab() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [selectedProject, submissions]);
+  }, [submissions]);
 
   function copyEmail(idx, text) {
     navigator.clipboard.writeText(text);
@@ -88,21 +84,14 @@ export default function DraftEmailsTab() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+      <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0f172a' }}>Draft Emails</h2>
-        <select style={{ padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13 }}
-          value={selectedProject} onChange={e => setSelectedProject(e.target.value)}>
-          <option value="">Select Project</option>
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
       </div>
 
-      {!selectedProject ? (
-        <div style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>Select a project to generate draft emails.</div>
-      ) : loading ? (
+      {loading ? (
         <div style={{ color: '#94a3b8', padding: 24 }}>Generating...</div>
       ) : emails.length === 0 ? (
-        <div style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>No emails to generate. Ensure submissions have pricing data.</div>
+        <div style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>No submissions yet. Upload factory quote sheets from the Submissions tab.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {emails.map((email, idx) => (

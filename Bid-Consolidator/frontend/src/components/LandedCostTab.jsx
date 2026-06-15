@@ -31,22 +31,21 @@ function pct(n) {
 
 export default function LandedCostTab() {
   const [submissions, setSubmissions] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState('');
   const [rows, setRows] = useState([]);
   const [saving, setSaving] = useState({});
   const [saved, setSaved] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/projects').then(r => setProjects(r.data)).catch(() => {});
-    api.get('/submissions').then(r => setSubmissions(r.data)).catch(() => {});
+    api.get('/submissions').then(r => {
+      setSubmissions(r.data);
+    }).catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    if (!selectedProject) { setRows([]); return; }
+    if (!submissions.length) { setLoading(false); return; }
     setLoading(true);
-    const subs = submissions.filter(s => String(s.project_id) === String(selectedProject) && s.status !== 'rejected');
+    const subs = submissions.filter(s => s.status !== 'rejected');
     Promise.all(subs.map(s => api.get(`/submissions/${s.id}/products`).then(r => r.data)))
       .then(results => {
         const flat = results.flat().map(p => ({
@@ -63,7 +62,7 @@ export default function LandedCostTab() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [selectedProject, submissions]);
+  }, [submissions]);
 
   function update(id, field, value) {
     setRows(rs => rs.map(r => r.id === id ? { ...r, [field]: value } : r));
@@ -95,18 +94,11 @@ export default function LandedCostTab() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+      <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0f172a' }}>Landed Cost Calculator</h2>
-        <select style={{ padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13 }}
-          value={selectedProject} onChange={e => setSelectedProject(e.target.value)}>
-          <option value="">Select Project</option>
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
       </div>
 
-      {!selectedProject ? (
-        <div style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>Select a project to begin.</div>
-      ) : loading ? (
+      {loading ? (
         <div style={{ color: '#94a3b8', padding: 24 }}>Loading...</div>
       ) : rows.length === 0 ? (
         <div style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>No products found.</div>
