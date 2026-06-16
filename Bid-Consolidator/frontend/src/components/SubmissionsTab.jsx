@@ -99,8 +99,8 @@ export default function SubmissionsTab() {
                   <tr key={sub.id} style={s.tr}>
                     <td style={s.td}><strong>{sub.factory_name}</strong></td>
                     <td style={s.td}>
-                      {sub.notes?.startsWith('Folder:')
-                        ? <span style={s.folderBadge}>{sub.notes.replace('Folder: ', '')}</span>
+                      {sub.notes
+                        ? <span style={s.folderBadge}>{sub.notes}</span>
                         : <span style={{ color: '#94a3b8' }}>—</span>}
                     </td>
                     <td style={s.td}><span style={s.fileName}>{sub.file_name}</span></td>

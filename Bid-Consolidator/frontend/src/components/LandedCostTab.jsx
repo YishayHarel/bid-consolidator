@@ -10,12 +10,13 @@ function calcLanded({ fob_price, total_fob, units_per_container, base_duty_pct, 
   const baseDuty   = (parseFloat(base_duty_pct)     || 0) / 100;
   const addlDuty   = (parseFloat(addl_duty_pct)     || 0) / 100;
 
-  const vsr_fob        = totalFob > 0 ? totalFob / 1.12 : 0;
-  const commission     = vsr_fob * 0.12;
+  const true_fob       = totalFob > 0 ? totalFob / 1.12 : 0;  // True FOB = Total FOB ÷ 1.12
+  const vsr_fob        = true_fob;
+  const commission     = totalFob > 0 ? totalFob - true_fob : 0; // Commission = Total FOB − True FOB
   const duty           = fob * (baseDuty + addlDuty);
   const freight_per_unit = units > 0 ? 7500 / units : null;
   const freight_pct    = (freight_per_unit !== null && fob > 0) ? freight_per_unit / fob : null;
-  const landed         = fob + commission + duty + (freight_per_unit || 0) + etcAmt;
+  const landed         = true_fob + commission + duty + (freight_per_unit || 0) + etcAmt;
 
   return { vsr_fob, commission, duty, freight_per_unit, freight_pct, landed };
 }
@@ -166,7 +167,7 @@ export default function LandedCostTab() {
                     <td style={td('#fff')}><strong>{row.style_num}</strong></td>
                     <td style={{ ...td('#fff'), maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.description}</td>
                     {/* auto section — all derived from VSR inputs */}
-                    <td style={td('#FFFFCC')}>{fmt(row.price)}</td>
+                    <td style={td('#FFFFCC')}>{calc.vsr_fob > 0 ? fmt(calc.vsr_fob) : fmt(row.price)}</td>
                     <td style={td('#FFFFCC')}>{fmt(calc.commission)}</td>
                     <td style={td('#FFFFCC')}>{fmt(calc.duty)}</td>
                     <td style={td('#FFFFCC')}>{calc.freight_per_unit !== null ? fmt(calc.freight_per_unit) : '—'}</td>
@@ -190,7 +191,7 @@ export default function LandedCostTab() {
                         value={row._total_fob} onChange={e => update(row.id, '_total_fob', e.target.value)} />
                     </td>
                     <td style={td('#FFFF00')}>{calc.vsr_fob > 0 ? fmt(calc.vsr_fob) : '—'}</td>
-                    <td style={{ ...td('#FFFF00'), color: '#64748b' }}>{calc.vsr_fob > 0 ? fmt(calc.commission) : '—'}</td>
+                    <td style={{ ...td('#FFFF00'), color: '#64748b', fontWeight: 600 }}>12%</td>
                     <td style={td('#FFFF00')}>
                       <input style={inp('#FFFF00')} type="number" step="0.1" placeholder="0"
                         value={row._base_duty_pct} onChange={e => update(row.id, '_base_duty_pct', e.target.value)} />

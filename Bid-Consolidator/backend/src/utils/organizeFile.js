@@ -62,4 +62,17 @@ async function organizeFile(currentPath, parsed, originalName) {
   return { folder, destPath, destName };
 }
 
-module.exports = { organizeFile };
+// Explicit folder: division/buyer (used when token carries that metadata)
+async function organizeByDivisionBuyer(currentPath, originalName, division, buyer) {
+  const destDir = path.join(UPLOADS_ROOT, division, buyer);
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+
+  const ext = path.extname(originalName);
+  const base = path.basename(originalName, ext);
+  const destName = `${Date.now()}-${base}${ext}`;
+  const destPath = path.join(destDir, destName);
+  fs.renameSync(currentPath, destPath);
+  return { folder: `${division}/${buyer}`, destPath, destName };
+}
+
+module.exports = { organizeFile, organizeByDivisionBuyer };

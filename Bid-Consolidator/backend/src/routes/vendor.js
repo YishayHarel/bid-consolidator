@@ -4,7 +4,7 @@ const path = require('path');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { parseExcel } = require('../utils/parseExcel');
-const { organizeFile } = require('../utils/organizeFile');
+const { organizeFile, organizeByDivisionBuyer } = require('../utils/organizeFile');
 
 const router = express.Router();
 
@@ -39,17 +39,16 @@ router.get('/tokens', requireAuth, async (req, res) => {
 
 // Internal: create token
 router.post('/tokens', requireAuth, async (req, res) => {
-  const { factory_name, project_id, expires_in_days } = req.body;
+  const { factory_name, division, buyer } = req.body;
   if (!factory_name) return res.status(400).json({ error: 'factory_name required' });
 
-  const days = parseInt(expires_in_days) || 7;
-  const expiresAt = new Date(Date.now() + days * 86400000);
+  const expiresAt = new Date(Date.now() + 30 * 86400000); // 30 days
 
   try {
     const result = await pool.query(
-      `INSERT INTO vendor_tokens (factory_name, project_id, expires_at, created_by)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [factory_name, project_id || null, expiresAt, req.user.id]
+      `INSERT INTO vendor_tokens (factory_name, division, buyer, expires_at, created_by)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [factory_name, division || null, buyer || null, expiresAt, req.user.id]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -103,7 +102,7 @@ router.post('/submit-open', upload.single('file'), async (req, res) => {
       const subResult = await client.query(
         `INSERT INTO submissions (factory_name, division, file_name, file_path, file_size, status, notes)
          VALUES ($1, $2, $3, $4, $5, 'pending', $6) RETURNING *`,
-        [factory_name, parsed.division, req.file.originalname, destPath, req.file.size, `Folder: ${folder}`]
+        [factory_name, parsed.division, req.file.originalname, destPath, req.file.size, `${parsed.division || 'General'} / ${folder}`]
       );
       const submission = subResult.rows[0];
       for (const p of parsed.products) {
@@ -140,15 +139,18 @@ router.post('/submit/:token', upload.single('file'), async (req, res) => {
     if (new Date(t.expires_at) < new Date()) return res.status(400).json({ error: 'Token expired' });
 
     const parsed = parseExcel(req.file.path);
-    const { folder, destPath } = await organizeFile(req.file.path, parsed, req.file.originalname);
+    // Use token's division/buyer for folder — skip AI when we already know
+    const division = t.division || parsed.division || 'General';
+    const buyer    = t.buyer    || parsed.detectedProject || 'Uncategorized';
+    const { destPath } = await organizeByDivisionBuyer(req.file.path, req.file.originalname, division, buyer);
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const subResult = await client.query(
-        `INSERT INTO submissions (factory_name, project_id, division, file_name, file_path, file_size, status, token_id, notes)
+        `INSERT INTO submissions (factory_name, division, buyer, file_name, file_path, file_size, status, token_id, notes)
          VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8) RETURNING *`,
-        [t.factory_name, t.project_id, parsed.division, req.file.originalname, destPath, req.file.size, t.id, `Folder: ${folder}`]
+        [t.factory_name, division, buyer, req.file.originalname, destPath, req.file.size, t.id, `${division} / ${buyer}`]
       );
       const submission = subResult.rows[0];
       for (const p of parsed.products) {
