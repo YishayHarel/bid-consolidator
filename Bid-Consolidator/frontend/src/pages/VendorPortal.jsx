@@ -10,6 +10,7 @@ export default function VendorPortal() {
   const [tokenStatus, setTokenStatus] = useState(token ? 'validating' : null);
   const [tokenFactory, setTokenFactory] = useState('');
   const [tokenProjectId, setTokenProjectId] = useState(null);
+  const [projectInfo, setProjectInfo] = useState(null);
 
   // Open mode
   const [factoryName, setFactoryName] = useState('');
@@ -30,6 +31,9 @@ export default function VendorPortal() {
             setTokenStatus('valid');
             setTokenFactory(data.factory_name);
             setTokenProjectId(data.project_id);
+            if (data.project_id) {
+              axios.get(`/api/projects/${data.project_id}`).then(r => setProjectInfo(r.data)).catch(() => {});
+            }
           } else {
             setTokenStatus(data.status);
           }
@@ -122,9 +126,23 @@ export default function VendorPortal() {
           </div>
         </div>
 
-        {token && tokenFactory && (
-          <div style={s.factoryBadge}>
-            <span style={{ color: '#64748b' }}>Factory:</span> <strong>{tokenFactory}</strong>
+        {token && (tokenFactory || projectInfo) && (
+          <div style={s.infoBlock}>
+            {projectInfo && (
+              <div style={s.projectInfo}>
+                <div style={s.infoLabel}>Project</div>
+                <div style={s.infoValue}>{projectInfo.name}</div>
+                {(projectInfo.buyer || projectInfo.division) && (
+                  <div style={s.infoMeta}>{[projectInfo.buyer, projectInfo.division].filter(Boolean).join(' • ')}</div>
+                )}
+              </div>
+            )}
+            {tokenFactory && (
+              <div style={s.factoryInfo}>
+                <div style={s.infoLabel}>Your Factory</div>
+                <div style={s.infoValue}>{tokenFactory}</div>
+              </div>
+            )}
           </div>
         )}
 
@@ -209,6 +227,12 @@ const s = {
   logoMark: { width: 40, height: 40, background: '#0f172a', color: '#fff', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700 },
   company: { fontSize: 16, fontWeight: 700, color: '#0f172a' },
   sub: { fontSize: 12, color: '#64748b' },
+  infoBlock: { display: 'flex', gap: 14, marginBottom: 20, flexWrap: 'wrap' },
+  projectInfo: { background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 7, padding: '10px 14px', flex: '1 1 auto', minWidth: 180 },
+  factoryInfo: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 7, padding: '10px 14px', flex: '1 1 auto', minWidth: 180 },
+  infoLabel: { fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 3 },
+  infoValue: { fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 2 },
+  infoMeta: { fontSize: 11, color: '#64748b' },
   factoryBadge: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 7, padding: '8px 14px', fontSize: 13, marginBottom: 20 },
   fieldWrap: { marginBottom: 16 },
   label: { display: 'block', fontSize: 13, fontWeight: 500, color: '#475569', marginBottom: 6 },

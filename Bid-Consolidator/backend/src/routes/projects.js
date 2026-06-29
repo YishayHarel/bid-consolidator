@@ -20,13 +20,17 @@ const upload = multer({
   },
 });
 
-// List all projects
+// List all projects with factory status
 router.get('/', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT p.*, COUNT(q.id)::int AS quote_count
+      SELECT p.*,
+             COUNT(DISTINCT q.id)::int AS quote_count,
+             COUNT(DISTINCT pf.id)::int AS factory_count,
+             COUNT(DISTINCT CASE WHEN pf.submitted_at IS NOT NULL THEN pf.id END)::int AS submitted_count
       FROM projects p
       LEFT JOIN quotes q ON q.project_id = p.id
+      LEFT JOIN project_factories pf ON pf.project_id = p.id
       GROUP BY p.id
       ORDER BY p.created_at DESC
     `);

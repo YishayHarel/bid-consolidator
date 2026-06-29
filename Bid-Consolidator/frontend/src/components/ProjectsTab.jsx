@@ -208,6 +208,18 @@ export default function ProjectsTab() {
                   <div style={s.quoteCount}>{p.quote_count} quotes</div>
                 </div>
 
+                <div style={s.statusRow}>
+                  <div style={s.statusBlock}>
+                    <div style={s.statusLabel}>Factories</div>
+                    <div style={s.statusVal}>{p.submitted_count}/{p.factory_count}</div>
+                    {p.factory_count > 0 && (
+                      <div style={s.progressBar}>
+                        <div style={{ ...s.progressFill, width: `${(p.submitted_count / p.factory_count) * 100}%` }} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div style={s.priceRow}>
                   <div style={s.priceBlock}>
                     <div style={s.priceLabel}>Last Price</div>
@@ -269,6 +281,12 @@ const s = {
   cardName: { fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 3 },
   cardMeta: { fontSize: 12, color: '#64748b' },
   quoteCount: { background: '#f1f5f9', color: '#475569', borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 600 },
+  statusRow: { display: 'flex', gap: 20, marginBottom: 14 },
+  statusBlock: { display: 'flex', flexDirection: 'column', gap: 6 },
+  statusLabel: { fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' },
+  statusVal: { fontSize: 16, fontWeight: 700, color: '#0f172a' },
+  progressBar: { width: 120, height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden' },
+  progressFill: { height: '100%', background: '#3b82f6', transition: 'width 0.3s' },
   priceRow: { display: 'flex', gap: 28, flexWrap: 'wrap' },
   priceBlock: { display: 'flex', flexDirection: 'column', gap: 4 },
   priceLabel: { fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' },

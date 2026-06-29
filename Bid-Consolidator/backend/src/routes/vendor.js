@@ -8,7 +8,8 @@ const { parseQuoteExcel } = require('../utils/parseExcel');
 
 const router = express.Router();
 
-const tmpDir = path.join(__dirname, '../../uploads/tmp');
+const uploadsRoot = path.join(__dirname, '../../uploads');
+const tmpDir = path.join(uploadsRoot, 'tmp');
 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
 const upload = multer({
@@ -104,8 +105,25 @@ router.post('/submit/:token', upload.single('file'), async (req, res) => {
     if (!t.project_id) return res.status(400).json({ error: 'Token not linked to a project' });
 
     const { quotes } = parseQuoteExcel(req.file.path);
-    fs.unlink(req.file.path, () => {});
-    if (!quotes.length) return res.status(400).json({ error: 'No rows found in file' });
+    if (!quotes.length) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: 'No rows found in file' });
+    }
+
+    // Get project name for folder organization
+    const { rows: projRows } = await pool.query('SELECT name FROM projects WHERE id=$1', [t.project_id]);
+    if (!projRows.length) throw new Error('Project not found');
+    const projectName = projRows[0].name.replace(/[^a-zA-Z0-9-]/g, '_');
+    const factoryName = t.factory_name.replace(/[^a-zA-Z0-9-]/g, '_');
+
+    // Organize file into uploads/ProjectName/FactoryName/
+    const destDir = path.join(uploadsRoot, projectName, factoryName);
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    const ext = path.extname(req.file.originalname);
+    const base = path.basename(req.file.originalname, ext);
+    const destName = `${Date.now()}-${base}${ext}`;
+    const destPath = path.join(destDir, destName);
+    fs.renameSync(req.file.path, destPath);
 
     const client = await pool.connect();
     try {
@@ -120,7 +138,7 @@ router.post('/submit/:token', upload.single('file'), async (req, res) => {
       await client.query('UPDATE project_factories SET submitted_at=NOW() WHERE project_id=$1 AND factory_name=$2', [t.project_id, t.factory_name]);
       await client.query('UPDATE vendor_tokens SET used_at=NOW() WHERE id=$1', [t.id]);
       await client.query('COMMIT');
-      if (req.app.locals.broadcast) req.app.locals.broadcast({ type: 'quote:new', factory_name: t.factory_name });
+      if (req.app.locals.broadcast) req.app.locals.broadcast({ type: 'quote:new', factory_name: t.factory_name, project_name: projectName });
       res.json({ success: true, factory_name: t.factory_name, count: quotes.length });
     } catch (err) {
       await client.query('ROLLBACK');
@@ -144,8 +162,25 @@ router.post('/submit-open', upload.single('file'), async (req, res) => {
 
   try {
     const { quotes } = parseQuoteExcel(req.file.path);
-    fs.unlink(req.file.path, () => {});
-    if (!quotes.length) return res.status(400).json({ error: 'No rows found in file' });
+    if (!quotes.length) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: 'No rows found in file' });
+    }
+
+    // Get project name for folder organization
+    const { rows: projRows } = await pool.query('SELECT name FROM projects WHERE id=$1', [project_id]);
+    if (!projRows.length) throw new Error('Project not found');
+    const projectName = projRows[0].name.replace(/[^a-zA-Z0-9-]/g, '_');
+    const cleanFactory = factory_name.replace(/[^a-zA-Z0-9-]/g, '_');
+
+    // Organize file into uploads/ProjectName/FactoryName/
+    const destDir = path.join(uploadsRoot, projectName, cleanFactory);
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    const ext = path.extname(req.file.originalname);
+    const base = path.basename(req.file.originalname, ext);
+    const destName = `${Date.now()}-${base}${ext}`;
+    const destPath = path.join(destDir, destName);
+    fs.renameSync(req.file.path, destPath);
 
     const client = await pool.connect();
     try {
@@ -157,8 +192,13 @@ router.post('/submit-open', upload.single('file'), async (req, res) => {
           [project_id, factory_name, q.style_num||null, q.description||null, q.category||null, q.color||null, q.scent_fragrance||null, q.packaging||null, q.moq||null, q.price||null, q.benchmark_link||null]
         );
       }
+      // Record submission in project_factories if factory exists in that project
+      await client.query(
+        `UPDATE project_factories SET submitted_at=NOW() WHERE project_id=$1 AND factory_name=$2`,
+        [project_id, factory_name]
+      );
       await client.query('COMMIT');
-      if (req.app.locals.broadcast) req.app.locals.broadcast({ type: 'quote:new', factory_name });
+      if (req.app.locals.broadcast) req.app.locals.broadcast({ type: 'quote:new', factory_name, project_name: projectName });
       res.json({ success: true, factory_name, count: quotes.length });
     } catch (err) {
       await client.query('ROLLBACK');

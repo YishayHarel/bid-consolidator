@@ -7,6 +7,8 @@ export default function EmailsTab() {
   const [drafts, setDrafts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState({});
+  const [sending, setSending] = useState({});
+  const [sentStatus, setSentStatus] = useState({});
 
   useEffect(() => {
     api.get('/projects').then(r => {
@@ -27,6 +29,26 @@ export default function EmailsTab() {
     navigator.clipboard.writeText(text);
     setCopied(c => ({ ...c, [draftId]: true }));
     setTimeout(() => setCopied(c => ({ ...c, [draftId]: false })), 2000);
+  }
+
+  async function sendEmail(draft, draftId) {
+    if (!draft.factory_name) {
+      alert('Team emails need a recipient email address. Copy & send manually.');
+      return;
+    }
+    setSending(s => ({ ...s, [draftId]: true }));
+    try {
+      await api.post('/emails/send', {
+        to: draft.factory_name + '@example.com', // Note: This is a placeholder
+        subject: draft.subject,
+        body: draft.body,
+      });
+      setSentStatus(st => ({ ...st, [draftId]: true }));
+      setTimeout(() => setSentStatus(st => ({ ...st, [draftId]: false })), 3000);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to send email. Check SMTP config.');
+    }
+    setSending(s => ({ ...s, [draftId]: false }));
   }
 
   const typeLabels = {
@@ -73,12 +95,21 @@ export default function EmailsTab() {
                     {draft.factory_name && <div style={s.factory}>{draft.factory_name}</div>}
                     <div style={s.status}>Status: {draft.status}</div>
                   </div>
-                  <button
-                    style={{ ...s.copyBtn, ...(copied[draftId] ? s.copiedBtn : {}) }}
-                    onClick={() => copyToClipboard(`Subject: ${draft.subject}\n\n${draft.body}`, draftId)}
-                  >
-                    {copied[draftId] ? '✓ Copied' : 'Copy'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      style={{ ...s.copyBtn, ...(copied[draftId] ? s.copiedBtn : {}) }}
+                      onClick={() => copyToClipboard(`Subject: ${draft.subject}\n\n${draft.body}`, draftId)}
+                    >
+                      {copied[draftId] ? '✓ Copied' : 'Copy'}
+                    </button>
+                    <button
+                      style={{ ...s.sendBtn, ...(sentStatus[draftId] ? s.sentBtn : {}) }}
+                      onClick={() => sendEmail(draft, draftId)}
+                      disabled={sending[draftId]}
+                    >
+                      {sentStatus[draftId] ? '✓ Sent' : sending[draftId] ? '...' : 'Send'}
+                    </button>
+                  </div>
                 </div>
                 <div style={s.subject}>Subject: {draft.subject}</div>
                 <div style={s.body}>{draft.body}</div>
@@ -103,4 +134,6 @@ const s = {
   body: { fontSize: 13, color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: 'monospace' },
   copyBtn: { padding: '5px 14px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' },
   copiedBtn: { background: '#166534' },
+  sendBtn: { padding: '5px 14px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' },
+  sentBtn: { background: '#0ea5e9' },
 };
