@@ -111,22 +111,46 @@ router.get('/:id/factories', requireAuth, async (req, res) => {
   }
 });
 
-// Invite factories to a project
+// Invite factories to a project + auto-generate tokens
 router.post('/:id/factories', requireAuth, async (req, res) => {
   const { factory_names } = req.body;
   if (!Array.isArray(factory_names) || factory_names.length === 0) {
     return res.status(400).json({ error: 'factory_names must be a non-empty array' });
   }
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO project_factories (project_id, factory_name)
-       VALUES ${factory_names.map((_, i) => `($1,$${i + 2})`).join(',')}
-       ON CONFLICT DO NOTHING
-       RETURNING *`,
-      [req.params.id, ...factory_names]
-    );
-    res.json(rows);
-  } catch {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Insert factories
+      const { rows: factories } = await client.query(
+        `INSERT INTO project_factories (project_id, factory_name)
+         VALUES ${factory_names.map((_, i) => `($1,$${i + 2})`).join(',')}
+         ON CONFLICT DO NOTHING
+         RETURNING id, factory_name`,
+        [req.params.id, ...factory_names]
+      );
+
+      // Auto-generate tokens for each factory
+      const expiresAt = new Date(Date.now() + 30 * 86400000);
+      for (const f of factories) {
+        await client.query(
+          `INSERT INTO vendor_tokens (factory_name, project_id, project_factory_id, expires_at, created_by)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [f.factory_name, req.params.id, f.id, expiresAt, req.user.id]
+        );
+      }
+
+      await client.query('COMMIT');
+      res.json(factories);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Server error' });
   }
 });

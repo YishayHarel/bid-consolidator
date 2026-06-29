@@ -69,10 +69,15 @@ export default function VendorLinksTab() {
     <div>
       <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>Vendor Links</h2>
       <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>
-        Generate a one-time link for a factory. When they upload, their quotes go directly into the linked project.
+        Links are automatically generated when you invite factories to a project. View and manage them below.
       </p>
 
-      <form onSubmit={generate} style={s.form}>
+      <div style={s.infoBox}>
+        <strong>ℹ️ Auto-generated:</strong> When you invite factories in the Projects tab, one-time links are created automatically. No need to generate them manually.
+      </div>
+
+      {/* Keep form hidden for now since tokens are auto-generated */}
+      <form onSubmit={generate} style={{ ...s.form, display: 'none' }}>
         <div style={s.formRow}>
           <div style={s.fieldGroup}>
             <label style={s.label}>Project</label>
@@ -153,6 +158,7 @@ export default function VendorLinksTab() {
 }
 
 const s = {
+  infoBox: { background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '12px 14px', marginBottom: 16, fontSize: 13, color: '#0369a1' },
   form: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '20px 24px', marginBottom: 16 },
   formRow: { display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' },
   fieldGroup: { display: 'flex', flexDirection: 'column', gap: 5 },

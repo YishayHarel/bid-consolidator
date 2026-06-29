@@ -41,17 +41,36 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
       [projectId]
     );
 
+    // Get tokens for each factory
+    const { rows: tokens } = await pool.query(
+      `SELECT pf.factory_name, vt.token
+       FROM project_factories pf
+       LEFT JOIN vendor_tokens vt ON vt.project_factory_id = pf.id
+       WHERE pf.project_id = $1
+       ORDER BY pf.factory_name`,
+      [projectId]
+    );
+
+    const tokenMap = {};
+    tokens.forEach(t => {
+      tokenMap[t.factory_name] = t.token;
+    });
+
     const p = project[0];
     const drafts = [];
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
     // 1. Initial vendor invite emails
     factories.forEach(f => {
+      const token = tokenMap[f.factory_name];
+      const link = token ? `${frontendUrl}/vendor?token=${token}` : `${frontendUrl}/vendor`;
       drafts.push({
         type: 'vendor_invite',
         factory_name: f.factory_name,
         subject: `Quote Request: ${p.name}`,
-        body: `Hi ${f.factory_name},\n\nWe're requesting a quote for the following project:\n\nProject: ${p.name}\nBuyer: ${p.buyer || 'N/A'}\nDivision: ${p.division || 'N/A'}\n\nPlease submit your quote using this link:\n${process.env.FRONTEND_URL || 'http://localhost:5173'}/vendor?token=[TOKEN]\n\nIf you have any questions, please let us know.\n\nBest regards,\nShalom International`,
+        body: `Hi ${f.factory_name},\n\nWe're requesting a quote for the following project:\n\nProject: ${p.name}\nBuyer: ${p.buyer || 'N/A'}\nDivision: ${p.division || 'N/A'}\n\nPlease submit your quote using this link:\n${link}\n\nIf you have any questions, please let us know.\n\nBest regards,\nShalom International`,
         status: f.status,
+        to: null, // Email will be added when we store factory emails
       });
     });
 
