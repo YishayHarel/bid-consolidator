@@ -1,44 +1,39 @@
 import { useState, useEffect } from 'react';
 import api from '../utils/api';
 
-const DIVISIONS = ['Hydration', 'Pet Beauty', 'Hard Coolers', 'Soft Coolers', 'Kitchen', 'General'];
-const BUYERS = ['TJ Maxx', 'Ross', 'Burlington', 'Body Glove', 'Target', 'Walmart', 'Amazon', 'Five Below', 'Costco'];
-
 export default function VendorLinksTab() {
   const [tokens, setTokens] = useState([]);
-  const [form, setForm] = useState({ division: '', buyer: '', factory_name: '' });
-  const [buyerInput, setBuyerInput] = useState('');
+  const [projects, setProjects] = useState([]);
+  const [form, setForm] = useState({ factory_name: '', project_id: '' });
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState({});
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { loadTokens(); }, []);
-
-  async function loadTokens() {
-    setLoading(true);
-    try {
-      const { data } = await api.get('/vendor/tokens');
-      setTokens(data);
-    } catch {}
-    setLoading(false);
-  }
+  useEffect(() => {
+    Promise.all([
+      api.get('/vendor/tokens'),
+      api.get('/vendor/projects'),
+    ]).then(([t, p]) => {
+      setTokens(t.data);
+      setProjects(p.data);
+      if (p.data.length > 0) setForm(f => ({ ...f, project_id: String(p.data[0].id) }));
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
 
   async function generate(e) {
     e.preventDefault();
-    const buyer = buyerInput.trim() || form.buyer;
-    if (!form.division || !buyer || !form.factory_name) return;
+    if (!form.factory_name.trim() || !form.project_id) return;
     setGenerating(true);
     try {
       const { data } = await api.post('/vendor/tokens', {
-        factory_name: form.factory_name,
-        division: form.division,
-        buyer,
+        factory_name: form.factory_name.trim(),
+        project_id: parseInt(form.project_id),
       });
       const link = `${window.location.origin}/vendor?token=${data.token}`;
       await navigator.clipboard.writeText(link);
-      setTokens(ts => [{ ...data, buyer, _link: link }, ...ts]);
-      setForm({ division: '', buyer: '', factory_name: '' });
-      setBuyerInput('');
+      const proj = projects.find(p => p.id === parseInt(form.project_id));
+      setTokens(ts => [{ ...data, project_name: proj?.name, _link: link }, ...ts]);
+      setForm(f => ({ ...f, factory_name: '' }));
       setCopied(c => ({ ...c, [data.id]: true }));
       setTimeout(() => setCopied(c => ({ ...c, [data.id]: false })), 4000);
     } catch (err) {
@@ -68,40 +63,24 @@ export default function VendorLinksTab() {
     return                                          { label: 'Active',   style: { background: '#dcfce7', color: '#166534' } };
   }
 
-  const formReady = form.division && (buyerInput.trim() || form.buyer) && form.factory_name.trim();
+  const formReady = form.factory_name.trim() && form.project_id;
 
   return (
     <div>
       <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>Vendor Links</h2>
       <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>
-        Generate a one-time upload link. The file will be saved to <code>uploads / Division / Buyer /</code> automatically.
+        Generate a one-time link for a factory. When they upload, their quotes go directly into the linked project.
       </p>
 
       <form onSubmit={generate} style={s.form}>
         <div style={s.formRow}>
-
           <div style={s.fieldGroup}>
-            <label style={s.label}>Division</label>
-            <select style={s.select} value={form.division} required
-              onChange={e => setForm(f => ({ ...f, division: e.target.value }))}>
-              <option value="">Select division...</option>
-              {DIVISIONS.map(d => <option key={d} value={d}>{d}</option>)}
+            <label style={s.label}>Project</label>
+            <select style={s.select} value={form.project_id} required
+              onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))}>
+              <option value="">Select project...</option>
+              {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
             </select>
-          </div>
-
-          <div style={s.arrow}>→</div>
-
-          <div style={s.fieldGroup}>
-            <label style={s.label}>Buyer</label>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <select style={s.select} value={form.buyer}
-                onChange={e => { setForm(f => ({ ...f, buyer: e.target.value })); setBuyerInput(''); }}>
-                <option value="">Select buyer...</option>
-                {BUYERS.map(b => <option key={b} value={b}>{b}</option>)}
-              </select>
-              <input style={{ ...s.select, width: 120 }} type="text" placeholder="or type new"
-                value={buyerInput} onChange={e => { setBuyerInput(e.target.value); setForm(f => ({ ...f, buyer: '' })); }} />
-            </div>
           </div>
 
           <div style={s.arrow}>→</div>
@@ -117,19 +96,13 @@ export default function VendorLinksTab() {
             {generating ? 'Generating...' : 'Generate & Copy Link'}
           </button>
         </div>
-
-        {form.division && (buyerInput.trim() || form.buyer) && (
-          <div style={s.preview}>
-            File will be saved to: <strong>uploads / {form.division} / {buyerInput.trim() || form.buyer} /</strong>
-          </div>
-        )}
       </form>
 
       {/* General link */}
       <div style={s.generalLink}>
         <div>
           <div style={{ fontWeight: 600, color: '#0f172a', marginBottom: 2 }}>General Upload Link</div>
-          <div style={{ fontSize: 12, color: '#64748b' }}>For vendors without a specific token — they'll enter their own factory name.</div>
+          <div style={{ fontSize: 12, color: '#64748b' }}>For factories without a token — they pick the project themselves.</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={s.linkText}>{window.location.origin}/vendor</span>
@@ -137,7 +110,6 @@ export default function VendorLinksTab() {
         </div>
       </div>
 
-      {/* Token list */}
       {loading ? (
         <div style={{ color: '#94a3b8', padding: 24 }}>Loading...</div>
       ) : tokens.length === 0 ? (
@@ -147,7 +119,7 @@ export default function VendorLinksTab() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['Factory', 'Division', 'Buyer', 'Expires', 'Status', ''].map(h => (
+                {['Factory', 'Project', 'Expires', 'Status', ''].map(h => (
                   <th key={h} style={s.th}>{h}</th>
                 ))}
               </tr>
@@ -158,8 +130,7 @@ export default function VendorLinksTab() {
                 return (
                   <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <td style={s.td}><strong>{t.factory_name}</strong></td>
-                    <td style={s.td}>{t.division || '—'}</td>
-                    <td style={s.td}>{t.buyer || '—'}</td>
+                    <td style={s.td}>{t.project_name || '—'}</td>
                     <td style={s.td}>{new Date(t.expires_at).toLocaleDateString()}</td>
                     <td style={s.td}><span style={{ ...s.badge, ...st.style }}>{st.label}</span></td>
                     <td style={s.td}>
@@ -186,10 +157,9 @@ const s = {
   formRow: { display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' },
   fieldGroup: { display: 'flex', flexDirection: 'column', gap: 5 },
   label: { fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' },
-  select: { padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, outline: 'none', minWidth: 150 },
+  select: { padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, outline: 'none', minWidth: 200 },
   arrow: { color: '#94a3b8', fontSize: 18, paddingBottom: 6 },
   genBtn: { padding: '9px 18px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' },
-  preview: { marginTop: 12, fontSize: 12, color: '#64748b', background: '#f8fafc', padding: '6px 10px', borderRadius: 5 },
   generalLink: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '12px 16px', marginBottom: 16, gap: 16 },
   linkText: { fontSize: 12, color: '#64748b', fontFamily: 'monospace' },
   copySmall: { padding: '4px 10px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer' },

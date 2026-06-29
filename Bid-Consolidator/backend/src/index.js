@@ -8,6 +8,7 @@ const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
 const submissionRoutes = require('./routes/submissions');
 const vendorRoutes = require('./routes/vendor');
+const emailRoutes = require('./routes/emails');
 
 const app = express();
 const server = http.createServer(app);
@@ -35,6 +36,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/vendor', vendorRoutes);
+app.use('/api/emails', emailRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err);

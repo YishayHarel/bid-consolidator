@@ -5,14 +5,16 @@ import VendorPortal from './pages/VendorPortal';
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem('token');
-  return token ? children : <Navigate to="/login" replace />;
+  return token ? children : <Navigate to="/admin" replace />;
 }
 
 export default function App() {
+  const isLoggedIn = !!localStorage.getItem('token');
+
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/admin" element={<LoginPage />} />
         <Route path="/vendor" element={<VendorPortal />} />
         <Route
           path="/internal/*"
@@ -22,7 +24,9 @@ export default function App() {
             </RequireAuth>
           }
         />
-        <Route path="/" element={<Navigate to="/internal" replace />} />
+        {/* Root: send staff to dashboard, vendors to vendor portal */}
+        <Route path="/" element={<Navigate to={isLoggedIn ? '/internal' : '/vendor'} replace />} />
+        <Route path="/login" element={<Navigate to="/admin" replace />} />
       </Routes>
     </BrowserRouter>
   );

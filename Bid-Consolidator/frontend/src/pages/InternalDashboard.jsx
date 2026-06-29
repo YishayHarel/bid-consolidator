@@ -1,17 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import SubmissionsTab from '../components/SubmissionsTab';
-import ComparisonTab from '../components/ComparisonTab';
+import ProjectsTab from '../components/ProjectsTab';
+import CompareTab from '../components/CompareTab';
+import UploadTab from '../components/UploadTab';
 import LandedCostTab from '../components/LandedCostTab';
-import DraftEmailsTab from '../components/DraftEmailsTab';
+import EmailsTab from '../components/EmailsTab';
 import VendorLinksTab from '../components/VendorLinksTab';
 
 const TABS = [
-  { id: 'submissions', label: 'Submissions' },
-  { id: 'comparison', label: 'Comparison' },
-  { id: 'landed-cost', label: 'Landed Cost' },
-  { id: 'draft-emails', label: 'Draft Emails' },
-  { id: 'vendor-links', label: 'Vendor Links' },
+  { id: 'projects',      label: 'Projects' },
+  { id: 'compare',       label: 'Compare' },
+  { id: 'upload',        label: 'Upload' },
+  { id: 'emails',        label: 'Emails' },
+  { id: 'landed-cost',   label: 'Landed Cost' },
+  { id: 'vendor-links',  label: 'Vendor Links' },
 ];
 
 export default function InternalDashboard() {
@@ -19,15 +21,15 @@ export default function InternalDashboard() {
   const location = useLocation();
   const [liveAlert, setLiveAlert] = useState(null);
 
-  const currentTab = TABS.find(t => location.pathname.includes(t.id))?.id || 'submissions';
+  const currentTab = TABS.find(t => location.pathname.includes(t.id))?.id || 'projects';
 
   useEffect(() => {
     const ws = new WebSocket(`ws://${window.location.hostname}:4000/ws`);
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === 'submission:new') {
-          setLiveAlert(`New submission from ${msg.submission.factory_name}`);
+        if (msg.type === 'quote:new') {
+          setLiveAlert(`New quote from ${msg.factory_name}`);
           setTimeout(() => setLiveAlert(null), 5000);
         }
       } catch {}
@@ -38,7 +40,7 @@ export default function InternalDashboard() {
 
   function logout() {
     localStorage.removeItem('token');
-    navigate('/login');
+    navigate('/vendor');
   }
 
   return (
@@ -75,10 +77,11 @@ export default function InternalDashboard() {
       </div>
 
       <main style={s.main}>
-        {currentTab === 'submissions' && <SubmissionsTab />}
-        {currentTab === 'comparison' && <ComparisonTab />}
-        {currentTab === 'landed-cost' && <LandedCostTab />}
-        {currentTab === 'draft-emails' && <DraftEmailsTab />}
+        {currentTab === 'projects'     && <ProjectsTab />}
+        {currentTab === 'compare'      && <CompareTab />}
+        {currentTab === 'upload'       && <UploadTab />}
+        {currentTab === 'emails'       && <EmailsTab />}
+        {currentTab === 'landed-cost'  && <LandedCostTab />}
         {currentTab === 'vendor-links' && <VendorLinksTab />}
       </main>
     </div>

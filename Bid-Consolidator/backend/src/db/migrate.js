@@ -21,11 +21,41 @@ async function migrate() {
       CREATE TABLE IF NOT EXISTS projects (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
+        buyer VARCHAR(255),
         division VARCHAR(100),
+        last_price NUMERIC(10,4),
         status VARCHAR(50) DEFAULT 'active',
         created_by INTEGER REFERENCES users(id),
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS quotes (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        factory_name VARCHAR(255) NOT NULL,
+        style_num VARCHAR(255),
+        description TEXT,
+        category VARCHAR(255),
+        color VARCHAR(255),
+        scent_fragrance VARCHAR(255),
+        packaging VARCHAR(255),
+        moq INTEGER,
+        price NUMERIC(10,4),
+        benchmark_link TEXT,
+        submitted_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS project_factories (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        factory_name VARCHAR(255) NOT NULL,
+        invited_at TIMESTAMPTZ DEFAULT NOW(),
+        submitted_at TIMESTAMPTZ,
+        UNIQUE(project_id, factory_name)
       );
     `);
 
@@ -35,65 +65,11 @@ async function migrate() {
         token UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
         factory_name VARCHAR(255) NOT NULL,
         project_id INTEGER REFERENCES projects(id),
+        project_factory_id INTEGER REFERENCES project_factories(id),
         expires_at TIMESTAMPTZ NOT NULL,
         used_at TIMESTAMPTZ,
         created_by INTEGER REFERENCES users(id),
         created_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS submissions (
-        id SERIAL PRIMARY KEY,
-        factory_name VARCHAR(255) NOT NULL,
-        project_id INTEGER REFERENCES projects(id),
-        division VARCHAR(100),
-        file_name VARCHAR(500),
-        file_path VARCHAR(500),
-        file_size INTEGER,
-        status VARCHAR(50) DEFAULT 'pending',
-        submitted_at TIMESTAMPTZ DEFAULT NOW(),
-        reviewed_at TIMESTAMPTZ,
-        reviewed_by INTEGER REFERENCES users(id),
-        notes TEXT,
-        token_id INTEGER REFERENCES vendor_tokens(id)
-      );
-    `);
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS products (
-        id SERIAL PRIMARY KEY,
-        submission_id INTEGER REFERENCES submissions(id) ON DELETE CASCADE,
-        factory_name VARCHAR(255),
-        style_num VARCHAR(255),
-        factory_style VARCHAR(255),
-        description TEXT,
-        packaging VARCHAR(255),
-        moq INTEGER,
-        price NUMERIC(10,4),
-        container_units INTEGER,
-        category VARCHAR(255),
-        color VARCHAR(255),
-        factory_photo VARCHAR(500),
-        internal_photo VARCHAR(500),
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS landed_costs (
-        id SERIAL PRIMARY KEY,
-        product_id INTEGER UNIQUE REFERENCES products(id) ON DELETE CASCADE,
-        submission_id INTEGER REFERENCES submissions(id) ON DELETE CASCADE,
-        commission_pct NUMERIC(6,4) DEFAULT 0.12,
-        base_duty_pct NUMERIC(6,4) DEFAULT 0,
-        addl_duty_pct NUMERIC(6,4) DEFAULT 0,
-        total_fob NUMERIC(10,4),
-        units_per_container INTEGER,
-        sell_price NUMERIC(10,4),
-        retail_price NUMERIC(10,4),
-        etc_amt NUMERIC(10,4) DEFAULT 0.10,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
 

@@ -6,31 +6,43 @@ export default function VendorPortal() {
   const [params] = useSearchParams();
   const token = params.get('token');
 
-  // Token mode state
+  // Token mode
   const [tokenStatus, setTokenStatus] = useState(token ? 'validating' : null);
   const [tokenFactory, setTokenFactory] = useState('');
+  const [tokenProjectId, setTokenProjectId] = useState(null);
 
-  // Open mode state
+  // Open mode
   const [factoryName, setFactoryName] = useState('');
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState('');
 
-  // Shared state
-  const [uploadState, setUploadState] = useState('idle'); // idle | uploading | success | error
+  // Shared
+  const [uploadState, setUploadState] = useState('idle');
   const [uploadError, setUploadError] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef();
 
   useEffect(() => {
-    if (!token) return;
-    axios.get(`/api/vendor/validate/${token}`)
-      .then(({ data }) => {
-        if (data.status === 'valid') {
-          setTokenStatus('valid');
-          setTokenFactory(data.factory_name);
-        } else {
-          setTokenStatus(data.status); // 'used' | 'expired' | 'invalid'
-        }
-      })
-      .catch(() => setTokenStatus('invalid'));
+    if (token) {
+      axios.get(`/api/vendor/validate/${token}`)
+        .then(({ data }) => {
+          if (data.status === 'valid') {
+            setTokenStatus('valid');
+            setTokenFactory(data.factory_name);
+            setTokenProjectId(data.project_id);
+          } else {
+            setTokenStatus(data.status);
+          }
+        })
+        .catch(() => setTokenStatus('invalid'));
+    } else {
+      axios.get('/api/vendor/open-projects')
+        .then(({ data }) => {
+          setProjects(data);
+          if (data.length > 0) setSelectedProject(String(data[0].id));
+        })
+        .catch(() => {});
+    }
   }, [token]);
 
   async function handleFile(file) {
@@ -41,6 +53,10 @@ export default function VendorPortal() {
     }
     if (!token && !factoryName.trim()) {
       setUploadError('Please enter your factory name first.');
+      return;
+    }
+    if (!token && !selectedProject) {
+      setUploadError('Please select a project.');
       return;
     }
     setUploadError('');
@@ -54,6 +70,7 @@ export default function VendorPortal() {
         await axios.post(`/api/vendor/submit/${token}`, form);
       } else {
         form.append('factory_name', factoryName.trim());
+        form.append('project_id', selectedProject);
         await axios.post('/api/vendor/submit-open', form);
       }
       setUploadState('success');
@@ -71,12 +88,11 @@ export default function VendorPortal() {
 
   const displayName = token ? tokenFactory : factoryName;
 
-  // Token mode — invalid/expired/used screens
   if (token && tokenStatus === 'validating') {
     return <Screen><p style={{ color: '#64748b' }}>Validating link...</p></Screen>;
   }
   if (token && tokenStatus === 'invalid') {
-    return <Screen><StatusBox color="#fee2e2" border="#fca5a5" title="Invalid Link" message="This upload link is invalid or has already been used." /></Screen>;
+    return <Screen><StatusBox color="#fee2e2" border="#fca5a5" title="Invalid Link" message="This upload link is invalid." /></Screen>;
   }
   if (token && tokenStatus === 'expired') {
     return <Screen><StatusBox color="#fff7ed" border="#fdba74" title="Link Expired" message="This upload link has expired. Please contact Shalom International for a new link." /></Screen>;
@@ -85,18 +101,16 @@ export default function VendorPortal() {
     return <Screen><StatusBox color="#f0fdf4" border="#86efac" title="Already Submitted" message={`A quote from ${tokenFactory} has already been submitted with this link.`} /></Screen>;
   }
 
-  // Success screen
   if (uploadState === 'success') {
     return (
       <Screen>
         <StatusBox color="#f0fdf4" border="#86efac"
           title="Quote Submitted!"
-          message={`Thank you${displayName ? `, ${displayName}` : ''}. Your quote has been received and is under review.`} />
+          message={`Thank you${displayName ? `, ${displayName}` : ''}. Your quote has been received.`} />
       </Screen>
     );
   }
 
-  // Upload form (open or token)
   return (
     <Screen>
       <div style={s.card}>
@@ -108,26 +122,31 @@ export default function VendorPortal() {
           </div>
         </div>
 
-        {/* Token mode: show pre-filled factory name */}
         {token && tokenFactory && (
           <div style={s.factoryBadge}>
             <span style={{ color: '#64748b' }}>Factory:</span> <strong>{tokenFactory}</strong>
           </div>
         )}
 
-        {/* Open mode: factory name input */}
         {!token && (
-          <div style={s.fieldWrap}>
-            <label style={s.label}>Your Factory Name</label>
-            <input
-              style={s.input}
-              type="text"
-              placeholder="e.g. Sunrise Manufacturing Co."
-              value={factoryName}
-              onChange={e => setFactoryName(e.target.value)}
-              disabled={uploadState === 'uploading'}
-            />
-          </div>
+          <>
+            <div style={s.fieldWrap}>
+              <label style={s.label}>Your Factory Name</label>
+              <input style={s.input} type="text" placeholder="e.g. Sunrise Manufacturing Co."
+                value={factoryName} onChange={e => setFactoryName(e.target.value)}
+                disabled={uploadState === 'uploading'} />
+            </div>
+            <div style={s.fieldWrap}>
+              <label style={s.label}>Project</label>
+              {projects.length === 0 ? (
+                <div style={{ fontSize: 13, color: '#94a3b8' }}>No open projects available.</div>
+              ) : (
+                <select style={s.input} value={selectedProject} onChange={e => setSelectedProject(e.target.value)}>
+                  {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+                </select>
+              )}
+            </div>
+          </>
         )}
 
         <div
@@ -146,9 +165,7 @@ export default function VendorPortal() {
               <line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
           </div>
-          <div style={s.dropText}>
-            {uploadState === 'uploading' ? 'Uploading...' : 'Drop your Excel file here'}
-          </div>
+          <div style={s.dropText}>{uploadState === 'uploading' ? 'Uploading...' : 'Drop your Excel file here'}</div>
           <div style={s.dropSub}>or click to browse — .xlsx or .xls, max 10MB</div>
         </div>
 
@@ -158,10 +175,10 @@ export default function VendorPortal() {
           <div style={s.instTitle}>Your quote sheet should include:</div>
           <ul style={s.instList}>
             <li>Factory name in cell A1</li>
-            <li>Style #, Factory Style, Description</li>
-            <li>Packaging, Color / Scent</li>
+            <li>Style #, Description, Category</li>
+            <li>Color, Scent / Fragrance, Packaging</li>
             <li>MOQ, Price 1</li>
-            <li>Units per 40" HQ Container</li>
+            <li>Benchmark Product Link (optional)</li>
           </ul>
         </div>
       </div>
@@ -195,7 +212,7 @@ const s = {
   factoryBadge: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 7, padding: '8px 14px', fontSize: 13, marginBottom: 20 },
   fieldWrap: { marginBottom: 16 },
   label: { display: 'block', fontSize: 13, fontWeight: 500, color: '#475569', marginBottom: 6 },
-  input: { width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 14, outline: 'none' },
+  input: { width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 14, outline: 'none', boxSizing: 'border-box' },
   dropzone: { border: '2px dashed #cbd5e1', borderRadius: 10, padding: '36px 20px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.15s', marginBottom: 12 },
   dropzoneOver: { borderColor: '#3b82f6', background: '#eff6ff' },
   dropzoneUploading: { opacity: 0.6, cursor: 'default' },
@@ -205,5 +222,5 @@ const s = {
   errorBox: { background: '#fef2f2', color: '#dc2626', padding: '8px 12px', borderRadius: 6, fontSize: 13, marginBottom: 12 },
   instructions: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '14px 16px' },
   instTitle: { fontSize: 13, fontWeight: 600, color: '#475569', marginBottom: 6 },
-  instList: { paddingLeft: 18, color: '#64748b', fontSize: 13, lineHeight: 2 },
+  instList: { paddingLeft: 18, color: '#64748b', fontSize: 13, lineHeight: 2, margin: 0 },
 };
