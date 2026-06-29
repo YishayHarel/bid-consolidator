@@ -122,6 +122,16 @@ router.post('/:id/factories', requireAuth, async (req, res) => {
   }
 });
 
+// Delete a factory from a project
+router.delete('/:id/factories/:fid', requireAuth, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM project_factories WHERE id=$1 AND project_id=$2', [req.params.fid, req.params.id]);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Get quotes for a project
 router.get('/:id/quotes', requireAuth, async (req, res) => {
   try {

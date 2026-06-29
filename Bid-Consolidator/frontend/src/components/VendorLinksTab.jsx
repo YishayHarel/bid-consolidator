@@ -12,7 +12,7 @@ export default function VendorLinksTab() {
   useEffect(() => {
     Promise.all([
       api.get('/vendor/tokens'),
-      api.get('/vendor/projects'),
+      api.get('/projects'),
     ]).then(([t, p]) => {
       setTokens(t.data);
       setProjects(p.data);

@@ -87,6 +87,16 @@ export default function ProjectsTab() {
     }
   }
 
+  async function deleteFactory(projectId, factoryId) {
+    if (!confirm('Remove this factory from the project?')) return;
+    try {
+      await api.delete(`/projects/${projectId}/factories/${factoryId}`);
+      setFactories(fs => fs.filter(f => f.id !== factoryId));
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to delete factory');
+    }
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -179,6 +189,9 @@ export default function ProjectsTab() {
                               </td>
                               <td style={s.td}>{new Date(f.invited_at).toLocaleDateString()}</td>
                               <td style={s.td}>{f.submitted_at ? new Date(f.submitted_at).toLocaleDateString() : '—'}</td>
+                              <td style={s.td}>
+                                <button style={s.delFactoryBtn} onClick={() => deleteFactory(p.id, f.id)}>✕</button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -268,6 +281,7 @@ const s = {
   th: { padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' },
   td: { padding: '10px 12px', fontSize: 13, color: '#334155' },
   badge: { padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600 },
+  delFactoryBtn: { background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 16, padding: '0 4px', lineHeight: 1 },
   form: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: 20, marginBottom: 20 },
   formRow: { display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 14 },
   field: { display: 'flex', flexDirection: 'column', gap: 5, flex: '1 1 180px' },
