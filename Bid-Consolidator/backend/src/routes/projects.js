@@ -6,6 +6,8 @@ const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { parseQuoteExcel } = require('../utils/parseExcel');
 
+const uploadsRoot = path.join(__dirname, '../../uploads');
+
 const router = express.Router();
 
 const tmpDir = path.join(__dirname, '../../uploads/tmp');
@@ -50,8 +52,15 @@ router.post('/', requireAuth, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [name, buyer || null, division || null, last_price || null, req.user.id]
     );
+    // Create folder for this project
+    const cleanName = name.replace(/[^a-zA-Z0-9-]/g, '_');
+    const projectFolder = path.join(uploadsRoot, cleanName);
+    if (!fs.existsSync(projectFolder)) {
+      fs.mkdirSync(projectFolder, { recursive: true });
+    }
     res.status(201).json(rows[0]);
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Server error' });
   }
 });
