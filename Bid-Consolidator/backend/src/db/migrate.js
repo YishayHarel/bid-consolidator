@@ -44,6 +44,16 @@ async function migrate() {
         moq INTEGER,
         price NUMERIC(10,4),
         benchmark_link TEXT,
+        total_fob NUMERIC(10,4),
+        base_duty_pct NUMERIC(10,4),
+        addl_duty_pct NUMERIC(10,4),
+        units_per_container INTEGER,
+        sell_price NUMERIC(10,4),
+        retail_price NUMERIC(10,4),
+        etc_amt NUMERIC(10,4) DEFAULT 0.10,
+        image_path VARCHAR(512),
+        comparison_notes TEXT,
+        is_selected_winner BOOLEAN DEFAULT false,
         submitted_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);

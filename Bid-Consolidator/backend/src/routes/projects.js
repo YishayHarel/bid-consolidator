@@ -178,6 +178,33 @@ router.get('/:id/quotes', requireAuth, async (req, res) => {
   }
 });
 
+// Get comparison data for a specific style (all factories' quotes for one product)
+router.get('/:id/comparison/:styleNum', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM quotes WHERE project_id=$1 AND style_num=$2 ORDER BY factory_name`,
+      [req.params.id, req.params.styleNum]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'No quotes found for this style' });
+    res.json(rows);
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get all unique styles for a project (for comparison tabs)
+router.get('/:id/styles', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT style_num, description FROM quotes WHERE project_id=$1 ORDER BY style_num`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Add a quote manually
 router.post('/:id/quotes', requireAuth, async (req, res) => {
   const { factory_name, style_num, description, category, color, scent_fragrance, packaging, moq, price, benchmark_link } = req.body;
@@ -223,6 +250,43 @@ router.post('/:id/upload', requireAuth, upload.single('file'), async (req, res) 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to process file' });
+  }
+});
+
+// Update quote (landed cost data + comparison data)
+router.patch('/:id/quotes/:qid', requireAuth, async (req, res) => {
+  const { total_fob, base_duty_pct, addl_duty_pct, units_per_container, sell_price, retail_price, etc_amt, comparison_notes, is_selected_winner } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE quotes
+       SET total_fob=$1, base_duty_pct=$2, addl_duty_pct=$3, units_per_container=$4, sell_price=$5, retail_price=$6, etc_amt=$7, comparison_notes=$8, is_selected_winner=$9
+       WHERE id=$10 AND project_id=$11
+       RETURNING *`,
+      [total_fob||null, base_duty_pct||0, addl_duty_pct||0, units_per_container||null, sell_price||null, retail_price||null, etc_amt||0.10, comparison_notes||null, is_selected_winner||false, req.params.qid, req.params.id]
+    );
+    res.json(rows[0]);
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get image for a quote (serve image file)
+router.get('/:id/quote-image/:qid', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT image_path FROM quotes WHERE id=$1 AND project_id=$2',
+      [req.params.qid, req.params.id]
+    );
+    if (!rows.length || !rows[0].image_path) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+    const imagePath = rows[0].image_path;
+    if (!fs.existsSync(imagePath)) {
+      return res.status(404).json({ error: 'Image file not found' });
+    }
+    res.sendFile(imagePath);
+  } catch {
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

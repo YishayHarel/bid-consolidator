@@ -5,6 +5,7 @@ const fs = require('fs');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { parseQuoteExcel } = require('../utils/parseExcel');
+const { extractImagesFromExcel } = require('../utils/extractImages');
 
 const router = express.Router();
 
@@ -125,14 +126,21 @@ router.post('/submit/:token', upload.single('file'), async (req, res) => {
     const destPath = path.join(destDir, destName);
     fs.renameSync(req.file.path, destPath);
 
+    // Extract images from Excel
+    const imagesDir = path.join(destDir, 'images');
+    const images = extractImagesFromExcel(destPath, imagesDir);
+    const imageArray = Object.values(images);
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      for (const q of quotes) {
+      for (let i = 0; i < quotes.length; i++) {
+        const q = quotes[i];
+        const imagePath = imageArray[i] || null;
         await client.query(
-          `INSERT INTO quotes (project_id, factory_name, style_num, description, category, color, scent_fragrance, packaging, moq, price, benchmark_link)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-          [t.project_id, t.factory_name, q.style_num||null, q.description||null, q.category||null, q.color||null, q.scent_fragrance||null, q.packaging||null, q.moq||null, q.price||null, q.benchmark_link||null]
+          `INSERT INTO quotes (project_id, factory_name, style_num, description, category, color, scent_fragrance, packaging, moq, price, benchmark_link, image_path)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [t.project_id, t.factory_name, q.style_num||null, q.description||null, q.category||null, q.color||null, q.scent_fragrance||null, q.packaging||null, q.moq||null, q.price||null, q.benchmark_link||null, imagePath]
         );
       }
       await client.query('UPDATE project_factories SET submitted_at=NOW() WHERE project_id=$1 AND factory_name=$2', [t.project_id, t.factory_name]);
@@ -182,14 +190,21 @@ router.post('/submit-open', upload.single('file'), async (req, res) => {
     const destPath = path.join(destDir, destName);
     fs.renameSync(req.file.path, destPath);
 
+    // Extract images from Excel
+    const imagesDir = path.join(destDir, 'images');
+    const images = extractImagesFromExcel(destPath, imagesDir);
+    const imageArray = Object.values(images);
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      for (const q of quotes) {
+      for (let i = 0; i < quotes.length; i++) {
+        const q = quotes[i];
+        const imagePath = imageArray[i] || null;
         await client.query(
-          `INSERT INTO quotes (project_id, factory_name, style_num, description, category, color, scent_fragrance, packaging, moq, price, benchmark_link)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-          [project_id, factory_name, q.style_num||null, q.description||null, q.category||null, q.color||null, q.scent_fragrance||null, q.packaging||null, q.moq||null, q.price||null, q.benchmark_link||null]
+          `INSERT INTO quotes (project_id, factory_name, style_num, description, category, color, scent_fragrance, packaging, moq, price, benchmark_link, image_path)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [project_id, factory_name, q.style_num||null, q.description||null, q.category||null, q.color||null, q.scent_fragrance||null, q.packaging||null, q.moq||null, q.price||null, q.benchmark_link||null, imagePath]
         );
       }
       // Record submission in project_factories if factory exists in that project

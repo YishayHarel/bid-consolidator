@@ -31,38 +31,45 @@ function fmtPct(n) {
 }
 
 export default function LandedCostTab() {
-  const [submissions, setSubmissions] = useState([]);
-  const [rows, setRows]       = useState([]);
-  const [saving, setSaving]   = useState({});
-  const [saved, setSaved]     = useState({});
-  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [quotes, setQuotes]     = useState([]);
+  const [rows, setRows]         = useState([]);
+  const [saving, setSaving]     = useState({});
+  const [saved, setSaved]       = useState({});
+  const [loading, setLoading]   = useState(true);
 
   useEffect(() => {
-    api.get('/submissions').then(r => setSubmissions(r.data)).catch(() => setLoading(false));
+    api.get('/projects').then(r => {
+      setProjects(r.data);
+      if (r.data.length > 0) {
+        const id = String(r.data[0].id);
+        setSelectedId(id);
+      }
+    }).catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    if (!submissions.length) { setLoading(false); return; }
+    if (!selectedId) return;
     setLoading(true);
-    const subs = submissions.filter(s => s.status !== 'rejected');
-    Promise.all(subs.map(s => api.get(`/submissions/${s.id}/products`).then(r => r.data)))
-      .then(results => {
-        const flat = results.flat().map(p => ({
-          ...p,
-          _total_fob:           p.total_fob           ?? p.price ?? '',
-          // stored as decimal in DB (0.072) → display as percent (7.2)
-          _base_duty_pct:       p.base_duty_pct != null ? +(p.base_duty_pct * 100).toFixed(4) : 0,
-          _addl_duty_pct:       p.addl_duty_pct != null ? +(p.addl_duty_pct * 100).toFixed(4) : 0,
-          _units_per_container: p.units_per_container ?? p.container_units ?? '',
-          _sell_price:          p.sell_price   ?? '',
-          _retail_price:        p.retail_price ?? '',
-          _etc_amt:             p.etc_amt      ?? 0.10,
+    api.get(`/projects/${selectedId}/quotes`)
+      .then(r => {
+        const qs = r.data.map(q => ({
+          ...q,
+          _total_fob:           q.total_fob           ?? q.price ?? '',
+          _base_duty_pct:       q.base_duty_pct       ?? 0,
+          _addl_duty_pct:       q.addl_duty_pct       ?? 0,
+          _units_per_container: q.units_per_container ?? '',
+          _sell_price:          q.sell_price          ?? '',
+          _retail_price:        q.retail_price        ?? '',
+          _etc_amt:             q.etc_amt             ?? 0.10,
         }));
-        setRows(flat);
+        setQuotes(qs);
+        setRows(qs);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [submissions]);
+  }, [selectedId]);
 
   function update(id, field, value) {
     setRows(rs => rs.map(r => r.id === id ? { ...r, [field]: value } : r));
@@ -71,12 +78,10 @@ export default function LandedCostTab() {
   async function saveRow(row) {
     setSaving(s => ({ ...s, [row.id]: true }));
     try {
-      await api.patch(`/submissions/products/${row.id}/landed-cost`, {
-        commission_pct:       0.12,
-        // convert back to decimal for storage
-        base_duty_pct:        (parseFloat(row._base_duty_pct) || 0) / 100,
-        addl_duty_pct:        (parseFloat(row._addl_duty_pct) || 0) / 100,
+      await api.patch(`/projects/${selectedId}/quotes/${row.id}`, {
         total_fob:            parseFloat(row._total_fob)            || null,
+        base_duty_pct:        parseFloat(row._base_duty_pct)        || 0,
+        addl_duty_pct:        parseFloat(row._addl_duty_pct)        || 0,
         units_per_container:  parseInt(row._units_per_container)    || null,
         sell_price:           parseFloat(row._sell_price)           || null,
         retail_price:         parseFloat(row._retail_price)         || null,
@@ -97,12 +102,26 @@ export default function LandedCostTab() {
     <div>
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0f172a' }}>Landed Cost Calculator</h2>
+        {projects.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <label style={{ fontSize: 13, fontWeight: 500, color: '#475569' }}>Project:</label>
+            <select
+              value={selectedId}
+              onChange={e => setSelectedId(e.target.value)}
+              style={{ padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, outline: 'none' }}
+            >
+              {projects.map(p => (
+                <option key={p.id} value={String(p.id)}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {loading ? (
         <div style={{ color: '#94a3b8', padding: 24 }}>Loading...</div>
       ) : rows.length === 0 ? (
-        <div style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>No products found.</div>
+        <div style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>No quotes found. Submit factory quotes to get started.</div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: 1600 }}>
@@ -147,9 +166,10 @@ export default function LandedCostTab() {
             </thead>
             <tbody>
               {rows.map(row => {
+                const fobPrice = parseFloat(row._total_fob) || parseFloat(row.price) || 0;
                 const calc = calcLanded({
-                  fob_price:           row.price,
-                  total_fob:           row._total_fob,
+                  fob_price:           fobPrice,
+                  total_fob:           parseFloat(row._total_fob) || fobPrice,
                   units_per_container: row._units_per_container,
                   base_duty_pct:       row._base_duty_pct,
                   addl_duty_pct:       row._addl_duty_pct,
