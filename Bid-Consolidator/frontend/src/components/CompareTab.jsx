@@ -25,7 +25,10 @@ export default function CompareTab() {
     setProject(proj || null);
     api.get(`/projects/${selectedId}/styles`)
       .then(r => setStyles(r.data))
-      .catch(() => setStyles([]))
+      .catch(err => {
+        console.error('Failed to load styles:', err);
+        setStyles([]);
+      })
       .finally(() => setLoading(false));
   }, [selectedId]);
 

@@ -7,7 +7,7 @@ export default function ProjectsTab() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', buyer: '', division: '', last_price: '' });
+  const [form, setForm] = useState({ name: '', buyer: '', division: '', last_price: '', templateFile: null });
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState(null);
   const [editPrice, setEditPrice] = useState('');
@@ -31,14 +31,19 @@ export default function ProjectsTab() {
     e.preventDefault();
     setSaving(true);
     try {
-      const { data } = await api.post('/projects', {
-        name: form.name,
-        buyer: form.buyer || null,
-        division: form.division || null,
-        last_price: form.last_price ? parseFloat(form.last_price) : null,
+      const formData = new FormData();
+      formData.append('name', form.name);
+      formData.append('buyer', form.buyer || null);
+      formData.append('division', form.division || null);
+      formData.append('last_price', form.last_price ? parseFloat(form.last_price) : null);
+      if (form.templateFile) {
+        formData.append('templateFile', form.templateFile);
+      }
+      const { data } = await api.post('/projects', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
       setProjects(ps => [{ ...data, quote_count: 0 }, ...ps]);
-      setForm({ name: '', buyer: '', division: '', last_price: '' });
+      setForm({ name: '', buyer: '', division: '', last_price: '', templateFile: null });
       setShowForm(false);
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to create project');
@@ -121,15 +126,22 @@ export default function ProjectsTab() {
             </div>
             <div style={s.field}>
               <label style={s.label}>Division</label>
-              <select style={s.input} value={form.division} onChange={e => setForm(f => ({ ...f, division: e.target.value }))}>
-                <option value="">Select...</option>
-                {DIVISIONS.map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
+              <input style={s.input} type="text" list="divisions-list" placeholder="e.g. Beauty, Hydration, Kitchen"
+                value={form.division} onChange={e => setForm(f => ({ ...f, division: e.target.value }))} />
+              <datalist id="divisions-list">
+                {DIVISIONS.map(d => <option key={d} value={d} />)}
+              </datalist>
             </div>
             <div style={s.field}>
               <label style={s.label}>Last Price ($)</label>
               <input style={s.input} type="number" step="0.01" placeholder="0.00"
                 value={form.last_price} onChange={e => setForm(f => ({ ...f, last_price: e.target.value }))} />
+            </div>
+            <div style={s.field}>
+              <label style={s.label}>Template File (Optional)</label>
+              <input style={s.input} type="file" accept=".xlsx,.xls"
+                onChange={e => setForm(f => ({ ...f, templateFile: e.target.files[0] }))} />
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Upload your product template with images (Excel file)</div>
             </div>
           </div>
           <button style={s.saveBtn} disabled={saving}>{saving ? 'Creating...' : 'Create Project'}</button>

@@ -22,6 +22,15 @@ const upload = multer({
   },
 });
 
+const templateUpload = multer({
+  dest: tmpDir,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = /\.(xlsx|xls)$/i.test(file.originalname);
+    cb(ok ? null : new Error('Only Excel files allowed'), ok);
+  },
+});
+
 // List all projects with factory status
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -43,7 +52,7 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // Create project
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, templateUpload.single('templateFile'), async (req, res) => {
   const { name, buyer, division, last_price } = req.body;
   if (!name) return res.status(400).json({ error: 'Name required' });
   try {
@@ -52,13 +61,27 @@ router.post('/', requireAuth, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [name, buyer || null, division || null, last_price || null, req.user.id]
     );
+    const project = rows[0];
+
     // Create folder for this project
     const cleanName = name.replace(/[^a-zA-Z0-9-]/g, '_');
     const projectFolder = path.join(uploadsRoot, cleanName);
     if (!fs.existsSync(projectFolder)) {
       fs.mkdirSync(projectFolder, { recursive: true });
     }
-    res.status(201).json(rows[0]);
+
+    // Handle template file if provided
+    if (req.file) {
+      const templateDir = path.join(projectFolder, 'template');
+      if (!fs.existsSync(templateDir)) {
+        fs.mkdirSync(templateDir, { recursive: true });
+      }
+      const timestamp = Date.now();
+      const destPath = path.join(templateDir, `${timestamp}-${req.file.originalname}`);
+      fs.renameSync(req.file.path, destPath);
+    }
+
+    res.status(201).json(project);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
