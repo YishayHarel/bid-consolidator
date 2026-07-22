@@ -83,6 +83,90 @@ async function migrate() {
       );
     `);
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS factories (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS factories_name_lower_idx ON factories (LOWER(name));
+    `);
+
+    await client.query(`
+      ALTER TABLE project_factories ADD COLUMN IF NOT EXISTS factory_id INTEGER REFERENCES factories(id) ON DELETE SET NULL;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS project_items (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        item_index INTEGER NOT NULL,
+        style_num VARCHAR(255),
+        description TEXT,
+        image_path VARCHAR(512),
+        UNIQUE(project_id, item_index)
+      );
+    `);
+
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS item_index INTEGER;`);
+    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS template_path VARCHAR(512);`);
+
+    // Landed-cost columns: listed in the CREATE TABLE above, but that is a
+    // no-op on the pre-existing quotes table, so add them explicitly. Their
+    // absence was silently 500ing winner-selection and every landed-cost save.
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS total_fob NUMERIC(10,4);`);
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS base_duty_pct NUMERIC(10,4);`);
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS addl_duty_pct NUMERIC(10,4);`);
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS units_per_container INTEGER;`);
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS sell_price NUMERIC(10,4);`);
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS retail_price NUMERIC(10,4);`);
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS etc_amt NUMERIC(10,4) DEFAULT 0.10;`);
+
+    // Multiple reference photos per outbound item row (the "Our Image #N" columns).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS project_item_images (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        item_index INTEGER NOT NULL,
+        position INTEGER NOT NULL,
+        image_path VARCHAR(512),
+        UNIQUE(project_id, item_index, position)
+      );
+    `);
+    await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS last_price NUMERIC(10,4);`);
+    await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS moq INTEGER;`);
+
+    // Pre-existing bug: deleting an invited factory 500'd whenever it had an
+    // auto-generated vendor token, since this FK had no ON DELETE behavior.
+    await client.query(`ALTER TABLE vendor_tokens DROP CONSTRAINT IF EXISTS vendor_tokens_project_factory_id_fkey;`);
+    await client.query(`
+      ALTER TABLE vendor_tokens ADD CONSTRAINT vendor_tokens_project_factory_id_fkey
+        FOREIGN KEY (project_factory_id) REFERENCES project_factories(id) ON DELETE CASCADE;
+    `);
+    // Same class of bug: deleting a project 500'd if it had vendor tokens.
+    await client.query(`ALTER TABLE vendor_tokens DROP CONSTRAINT IF EXISTS vendor_tokens_project_id_fkey;`);
+    await client.query(`
+      ALTER TABLE vendor_tokens ADD CONSTRAINT vendor_tokens_project_id_fkey
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE;
+    `);
+
+    // Backfill item_index for quotes imported before this column existed.
+    // The old parser required a style_num on every row it kept, so every
+    // pre-existing row has one — rank distinct style_nums per project to
+    // preserve the exact grouping the old style_num-based Compare tab used.
+    await client.query(`
+      WITH ranked AS (
+        SELECT id, DENSE_RANK() OVER (PARTITION BY project_id ORDER BY style_num) AS rnk
+        FROM quotes
+        WHERE item_index IS NULL AND style_num IS NOT NULL
+      )
+      UPDATE quotes q SET item_index = ranked.rnk
+      FROM ranked WHERE q.id = ranked.id;
+    `);
+
     await client.query('COMMIT');
     console.log('Migration complete.');
   } catch (err) {

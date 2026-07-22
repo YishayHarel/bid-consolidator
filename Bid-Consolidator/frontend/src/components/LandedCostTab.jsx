@@ -54,7 +54,9 @@ export default function LandedCostTab() {
     setLoading(true);
     api.get(`/projects/${selectedId}/quotes`)
       .then(r => {
-        const qs = r.data.map(q => ({
+        const qs = r.data
+          .filter(q => q.is_selected_winner)
+          .map(q => ({
           ...q,
           _total_fob:           q.total_fob           ?? q.price ?? '',
           _base_duty_pct:       q.base_duty_pct       ?? 0,
@@ -121,7 +123,7 @@ export default function LandedCostTab() {
       {loading ? (
         <div style={{ color: '#94a3b8', padding: 24 }}>Loading...</div>
       ) : rows.length === 0 ? (
-        <div style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>No quotes found. Submit factory quotes to get started.</div>
+        <div style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>No winners selected yet. Pick the winning factory for each item in the Compare tab.</div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: 1600 }}>
@@ -184,8 +186,8 @@ export default function LandedCostTab() {
                 return (
                   <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <td style={td('#fff')}>{row.factory_name}</td>
-                    <td style={td('#fff')}><strong>{row.style_num}</strong></td>
-                    <td style={{ ...td('#fff'), maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.description}</td>
+                    <td style={td('#fff')}><strong>{row.item_style_num || row.style_num}</strong></td>
+                    <td style={{ ...td('#fff'), maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.item_description || row.description}</td>
                     {/* auto section — all derived from VSR inputs */}
                     <td style={td('#FFFFCC')}>{calc.vsr_fob > 0 ? fmt(calc.vsr_fob) : fmt(row.price)}</td>
                     <td style={td('#FFFFCC')}>{fmt(calc.commission)}</td>

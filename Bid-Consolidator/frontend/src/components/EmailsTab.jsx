@@ -32,16 +32,20 @@ export default function EmailsTab() {
   }
 
   async function sendEmail(draft, draftId) {
-    if (!draft.factory_name) {
-      alert('Team emails need a recipient email address. Copy & send manually.');
+    if (!draft.to) {
+      alert(draft.factory_name
+        ? `No email on file for ${draft.factory_name}. Add one in Settings, or copy & send manually.`
+        : 'This email needs a recipient address. Copy & send manually.');
       return;
     }
     setSending(s => ({ ...s, [draftId]: true }));
     try {
       await api.post('/emails/send', {
-        to: draft.factory_name + '@example.com', // Note: This is a placeholder
+        to: draft.to,
         subject: draft.subject,
         body: draft.body,
+        project_id: draft.project_id,
+        type: draft.type,
       });
       setSentStatus(st => ({ ...st, [draftId]: true }));
       setTimeout(() => setSentStatus(st => ({ ...st, [draftId]: false })), 3000);
@@ -113,6 +117,9 @@ export default function EmailsTab() {
                 </div>
                 <div style={s.subject}>Subject: {draft.subject}</div>
                 <div style={s.body}>{draft.body}</div>
+                {draft.attachment && (
+                  <div style={s.attachment}>📎 {draft.attachment}</div>
+                )}
               </div>
             );
           })}
@@ -132,6 +139,7 @@ const s = {
   status: { fontSize: 11, color: '#64748b', fontStyle: 'italic' },
   subject: { fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid rgba(0,0,0,0.1)' },
   body: { fontSize: 13, color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: 'monospace' },
+  attachment: { marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(0,0,0,0.12)', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600, color: '#334155' },
   copyBtn: { padding: '5px 14px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' },
   copiedBtn: { background: '#166534' },
   sendBtn: { padding: '5px 14px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' },

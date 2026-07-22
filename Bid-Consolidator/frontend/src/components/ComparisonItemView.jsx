@@ -14,14 +14,20 @@ const FACTORY_TINTS = {
 
 const tintKeys = Object.keys(FACTORY_TINTS);
 
-export default function ComparisonItemView({ projectId, styleNum, description }) {
+export default function ComparisonItemView({ projectId, itemIndex, styleNum, description, imageCount = 0, lastPrice, moq }) {
   const [quotes, setQuotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingNotes, setEditingNotes] = useState({});
   const [saving, setSaving] = useState({});
+  const [lastPriceVal, setLastPriceVal] = useState(lastPrice ?? '');
+  const [descExpanded, setDescExpanded] = useState(false);
 
   useEffect(() => {
-    api.get(`/projects/${projectId}/comparison/${styleNum}`)
+    setLastPriceVal(lastPrice ?? '');
+  }, [lastPrice]);
+
+  useEffect(() => {
+    api.get(`/projects/${projectId}/comparison/${itemIndex}`)
       .then(r => {
         setQuotes(r.data);
         setLoading(false);
@@ -30,7 +36,7 @@ export default function ComparisonItemView({ projectId, styleNum, description })
         console.error('Failed to load comparison:', err);
         setLoading(false);
       });
-  }, [projectId, styleNum]);
+  }, [projectId, itemIndex]);
 
   async function updateQuote(quoteId, updates) {
     setSaving(s => ({ ...s, [quoteId]: true }));
@@ -44,22 +50,52 @@ export default function ComparisonItemView({ projectId, styleNum, description })
     setSaving(s => ({ ...s, [quoteId]: false }));
   }
 
-  function selectWinner(quoteId) {
+  function toggleWinner(quote) {
+    // Clicking the winner again clears it; otherwise select it and clear others.
+    if (quote.is_selected_winner) {
+      updateQuote(quote.id, { is_selected_winner: false });
+      return;
+    }
     quotes.forEach(q => {
-      if (q.is_selected_winner && q.id !== quoteId) {
+      if (q.is_selected_winner && q.id !== quote.id) {
         updateQuote(q.id, { is_selected_winner: false });
       }
     });
-    updateQuote(quoteId, { is_selected_winner: true });
+    updateQuote(quote.id, { is_selected_winner: true });
   }
 
+  async function saveLastPrice() {
+    try {
+      await api.patch(`/projects/${projectId}/items/${itemIndex}`, {
+        last_price: lastPriceVal === '' ? null : parseFloat(lastPriceVal),
+      });
+    } catch (err) {
+      console.error('Last Price save failed:', err);
+    }
+  }
+
+  const ourImageCols = Array.from({ length: imageCount || 0 }, (_, k) => k);
+
+  // Description is clipped to one line by default; click toggles it to wrap
+  // and expand downward.
+  const descCell = (
+    <td style={s.descTd}>
+      <div
+        onClick={() => setDescExpanded(v => !v)}
+        style={descExpanded ? s.descExpanded : s.descClamped}
+        title={descExpanded ? 'Click to collapse' : 'Click to expand'}
+      >
+        {description || '—'}
+      </div>
+    </td>
+  );
+
   if (loading) return <div style={s.loading}>Loading...</div>;
-  if (!quotes.length) return <div style={s.empty}>No quotes for this style.</div>;
 
   return (
     <div style={s.container}>
       <div style={s.productHeader}>
-        <div style={s.productTitle}>{styleNum}</div>
+        <div style={s.productTitle}>{styleNum || `Item ${itemIndex}`}</div>
         <div style={s.productDesc}>{description}</div>
       </div>
 
@@ -68,16 +104,38 @@ export default function ComparisonItemView({ projectId, styleNum, description })
           <thead>
             <tr>
               <th style={s.th}>Factory</th>
-              <th style={s.th}>Our Image</th>
-              <th style={s.th}>Their Image</th>
+              {ourImageCols.map(k => <th key={k} style={s.th}>Our Image #{k + 1}</th>)}
               <th style={s.th}>Description</th>
-              <th style={s.th}>Color</th>
+              <th style={s.th}>Last Price</th>
+              <th style={s.th}>Their Image</th>
+              <th style={s.th}>MOQ</th>
               <th style={s.th}>Price</th>
               <th style={s.th}>Notes</th>
               <th style={s.th}>Select</th>
             </tr>
           </thead>
           <tbody>
+            {quotes.length === 0 && (
+              <tr style={{ ...s.row, background: '#fff' }}>
+                <td style={s.td}><div style={{ color: '#94a3b8', fontStyle: 'italic' }}>Awaiting quotes</div></td>
+                {ourImageCols.map(k => (
+                  <td key={k} style={s.imageTd}>
+                    <img src={`/api/projects/${projectId}/item-image/${itemIndex}/${k}`} style={s.productImage}
+                      onError={(e) => { e.target.style.display = 'none'; }} />
+                  </td>
+                ))}
+                {descCell}
+                <td style={s.priceTd}>
+                  <input type="number" step="0.01" placeholder="—" value={lastPriceVal}
+                    onChange={(e) => setLastPriceVal(e.target.value)} onBlur={saveLastPrice} style={s.lastPriceInput} />
+                </td>
+                <td style={s.imageTd}><div style={s.imagePlaceholder}>—</div></td>
+                <td style={s.td}>{moq != null ? Number(moq).toLocaleString() : '—'}</td>
+                <td style={s.td}>$—</td>
+                <td style={s.noteTd}></td>
+                <td style={s.td}></td>
+              </tr>
+            )}
             {quotes.map((quote, idx) => {
               const tint = FACTORY_TINTS[tintKeys[idx % tintKeys.length]];
               const isWinner = quote.is_selected_winner;
@@ -87,9 +145,26 @@ export default function ComparisonItemView({ projectId, styleNum, description })
                   <td style={s.td}>
                     <div style={{ fontWeight: 700, color: tint.text }}>{quote.factory_name}</div>
                   </td>
-                  <td style={s.imageTd}>
-                    {/* Our image would go here - not in quotes table yet */}
-                    <div style={s.imagePlaceholder}>—</div>
+                  {ourImageCols.map(k => (
+                    <td key={k} style={s.imageTd}>
+                      <img
+                        src={`/api/projects/${projectId}/item-image/${itemIndex}/${k}`}
+                        style={s.productImage}
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
+                    </td>
+                  ))}
+                  {descCell}
+                  <td style={s.priceTd}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="—"
+                      value={lastPriceVal}
+                      onChange={(e) => setLastPriceVal(e.target.value)}
+                      onBlur={saveLastPrice}
+                      style={s.lastPriceInput}
+                    />
                   </td>
                   <td style={s.imageTd}>
                     {quote.image_path ? (
@@ -102,8 +177,7 @@ export default function ComparisonItemView({ projectId, styleNum, description })
                       <div style={s.imagePlaceholder}>—</div>
                     )}
                   </td>
-                  <td style={s.td}>{quote.description || '—'}</td>
-                  <td style={s.td}>{quote.color || '—'}</td>
+                  <td style={s.td}>{moq != null ? Number(moq).toLocaleString() : '—'}</td>
                   <td style={{ ...s.td, fontWeight: 700, color: tint.text }}>
                     ${quote.price ? parseFloat(quote.price).toFixed(2) : '—'}
                   </td>
@@ -123,7 +197,8 @@ export default function ComparisonItemView({ projectId, styleNum, description })
                   </td>
                   <td style={s.td}>
                     <button
-                      onClick={() => selectWinner(quote.id)}
+                      onClick={() => toggleWinner(quote)}
+                      title={isWinner ? 'Winner — click to unselect' : 'Select as winner'}
                       style={{
                         ...s.selectBtn,
                         background: isWinner ? tint.text : '#e2e8f0',
@@ -153,13 +228,18 @@ const s = {
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
   th: { padding: '10px 12px', textAlign: 'left', background: '#f8fafc', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap', textTransform: 'uppercase', fontSize: 11 },
   row: { borderBottom: '1px solid #e2e8f0', transition: 'background 0.2s' },
-  td: { padding: '12px', color: '#334155', whiteSpace: 'nowrap' },
-  imageTd: { padding: '8px', textAlign: 'center' },
+  td: { padding: '16px 12px', color: '#334155', whiteSpace: 'nowrap', verticalAlign: 'middle' },
+  imageTd: { padding: '10px', textAlign: 'center', verticalAlign: 'middle' },
   imagePlaceholder: { color: '#cbd5e1', fontSize: 12 },
-  productImage: { maxWidth: 50, maxHeight: 50, objectFit: 'contain' },
-  noteTd: { padding: '8px', width: 150 },
-  noteInput: { width: '100%', padding: '6px', fontSize: 11, border: '1px solid #e2e8f0', borderRadius: 4, fontFamily: 'inherit', resize: 'vertical', minHeight: 40 },
-  selectBtn: { padding: '6px 12px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' },
+  productImage: { maxWidth: 110, maxHeight: 110, objectFit: 'contain' },
+  descTd: { padding: '16px 12px', color: '#334155', verticalAlign: 'top', maxWidth: 240 },
+  descClamped: { maxWidth: 240, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' },
+  descExpanded: { maxWidth: 240, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.5, cursor: 'pointer' },
+  priceTd: { padding: '10px 12px', verticalAlign: 'middle' },
+  lastPriceInput: { width: 80, padding: '6px 8px', fontSize: 12, border: '1px solid #e2e8f0', borderRadius: 4, textAlign: 'right' },
+  noteTd: { padding: '10px', width: 160, verticalAlign: 'middle' },
+  noteInput: { width: '100%', padding: '6px', fontSize: 11, border: '1px solid #e2e8f0', borderRadius: 4, fontFamily: 'inherit', resize: 'vertical', minHeight: 48 },
+  selectBtn: { padding: '8px 14px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' },
   loading: { color: '#94a3b8', padding: 20, textAlign: 'center' },
   empty: { color: '#94a3b8', padding: 20, textAlign: 'center' },
 };

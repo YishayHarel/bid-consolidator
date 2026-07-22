@@ -5,6 +5,9 @@ const fs = require('fs');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { parseQuoteExcel } = require('../utils/parseExcel');
+const { extractImagesFromExcel, extractImagesByRow } = require('../utils/extractImages');
+const { upsertFactory } = require('../utils/factories');
+const { resolveItemIndex } = require('../utils/matchItems');
 
 const uploadsRoot = path.join(__dirname, '../../uploads');
 
@@ -79,6 +82,39 @@ router.post('/', requireAuth, templateUpload.single('templateFile'), async (req,
       const timestamp = Date.now();
       const destPath = path.join(templateDir, `${timestamp}-${req.file.originalname}`);
       fs.renameSync(req.file.path, destPath);
+
+      const { rows: updated } = await pool.query(
+        'UPDATE projects SET template_path=$1 WHERE id=$2 RETURNING *',
+        [destPath, project.id]
+      );
+      Object.assign(project, updated[0]);
+
+      // Best-effort: parse the template's items + images for the "Our Image"
+      // columns. Images are grouped by worksheet row, so a product row with
+      // several photos yields several "Our Image #N" entries. Must never fail
+      // project creation.
+      try {
+        const { quotes: items } = parseQuoteExcel(destPath);
+        const imagesDir = path.join(templateDir, 'images');
+        const imagesByRow = extractImagesByRow(destPath, imagesDir);
+        for (const it of items) {
+          const photos = imagesByRow[it.excel_row] || [];
+          await pool.query(
+            `INSERT INTO project_items (project_id, item_index, style_num, description, moq, image_path)
+             VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (project_id, item_index) DO NOTHING`,
+            [project.id, it.item_index, it.style_num || null, it.description || null, it.moq || null, photos[0] || null]
+          );
+          for (let p = 0; p < photos.length; p++) {
+            await pool.query(
+              `INSERT INTO project_item_images (project_id, item_index, position, image_path)
+               VALUES ($1,$2,$3,$4) ON CONFLICT (project_id, item_index, position) DO NOTHING`,
+              [project.id, it.item_index, p, photos[p]]
+            );
+          }
+        }
+      } catch (err) {
+        console.error('Template parse failed (non-fatal):', err);
+      }
     }
 
     res.status(201).json(project);
@@ -118,45 +154,72 @@ router.delete('/:id', requireAuth, async (req, res) => {
 // Get factories invited to a project
 router.get('/:id/factories', requireAuth, async (req, res) => {
   try {
+    const { rows: totalRows } = await pool.query(
+      'SELECT COUNT(*)::int AS total FROM project_items WHERE project_id=$1',
+      [req.params.id]
+    );
+    const totalItems = totalRows[0].total;
+
     const { rows } = await pool.query(
       `SELECT pf.*,
+              COALESCE(f.name, pf.factory_name) AS display_name,
+              f.email,
+              COUNT(DISTINCT q.item_index)::int AS items_received,
               CASE WHEN pf.submitted_at IS NOT NULL THEN 'submitted'
                    WHEN pf.submitted_at IS NULL AND NOW() - pf.invited_at > interval '2 days' THEN 'no_response'
                    ELSE 'pending' END as status
        FROM project_factories pf
+       LEFT JOIN factories f ON f.id = pf.factory_id
+       LEFT JOIN quotes q ON q.project_id = pf.project_id AND q.factory_name = pf.factory_name AND q.item_index IS NOT NULL
        WHERE pf.project_id=$1
+       GROUP BY pf.id, f.name, f.email
        ORDER BY pf.factory_name`,
       [req.params.id]
     );
-    res.json(rows);
-  } catch {
+    res.json(rows.map(r => ({ ...r, total_items: totalItems })));
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 // Invite factories to a project + auto-generate tokens
+// body: { factories: [{ factory_id?: number, name: string, email?: string }] }
 router.post('/:id/factories', requireAuth, async (req, res) => {
-  const { factory_names } = req.body;
-  if (!Array.isArray(factory_names) || factory_names.length === 0) {
-    return res.status(400).json({ error: 'factory_names must be a non-empty array' });
+  const { factories: toInvite } = req.body;
+  if (!Array.isArray(toInvite) || toInvite.length === 0) {
+    return res.status(400).json({ error: 'factories must be a non-empty array' });
   }
   try {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Insert factories
-      const { rows: factories } = await client.query(
-        `INSERT INTO project_factories (project_id, factory_name)
-         VALUES ${factory_names.map((_, i) => `($1,$${i + 2})`).join(',')}
-         ON CONFLICT DO NOTHING
-         RETURNING id, factory_name`,
-        [req.params.id, ...factory_names]
-      );
+      const inserted = [];
+      for (const entry of toInvite) {
+        let factory;
+        if (entry.factory_id) {
+          const { rows } = await client.query('SELECT * FROM factories WHERE id=$1', [entry.factory_id]);
+          factory = rows[0];
+          if (!factory) continue;
+        } else {
+          if (!entry.name || !entry.name.trim()) continue;
+          factory = await upsertFactory(client, entry.name, entry.email);
+        }
 
-      // Auto-generate tokens for each factory
+        const { rows: pfRows } = await client.query(
+          `INSERT INTO project_factories (project_id, factory_name, factory_id)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (project_id, factory_name) DO NOTHING
+           RETURNING id, factory_name`,
+          [req.params.id, factory.name, factory.id]
+        );
+        if (pfRows.length) inserted.push(pfRows[0]);
+      }
+
+      // Auto-generate tokens for each newly-invited factory
       const expiresAt = new Date(Date.now() + 30 * 86400000);
-      for (const f of factories) {
+      for (const f of inserted) {
         await client.query(
           `INSERT INTO vendor_tokens (factory_name, project_id, project_factory_id, expires_at, created_by)
            VALUES ($1, $2, $3, $4, $5)`,
@@ -165,7 +228,7 @@ router.post('/:id/factories', requireAuth, async (req, res) => {
       }
 
       await client.query('COMMIT');
-      res.json(factories);
+      res.json(inserted);
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -188,11 +251,14 @@ router.delete('/:id/factories/:fid', requireAuth, async (req, res) => {
   }
 });
 
-// Get quotes for a project
+// Get quotes for a project (with the outbound item's description/style joined in)
 router.get('/:id/quotes', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT * FROM quotes WHERE project_id=$1 ORDER BY factory_name, style_num',
+      `SELECT q.*, pi.description AS item_description, pi.style_num AS item_style_num
+       FROM quotes q
+       LEFT JOIN project_items pi ON pi.project_id = q.project_id AND pi.item_index = q.item_index
+       WHERE q.project_id=$1 ORDER BY q.factory_name, q.style_num`,
       [req.params.id]
     );
     res.json(rows);
@@ -201,29 +267,67 @@ router.get('/:id/quotes', requireAuth, async (req, res) => {
   }
 });
 
-// Get comparison data for a specific style (all factories' quotes for one product)
-router.get('/:id/comparison/:styleNum', requireAuth, async (req, res) => {
+// Update an outbound item's fields (currently just the manual Last Price).
+// Upsert so it works even for projects with no template row yet.
+router.patch('/:id/items/:itemIndex', requireAuth, async (req, res) => {
+  const { last_price } = req.body;
+  const value = last_price != null && last_price !== '' ? last_price : null;
   try {
     const { rows } = await pool.query(
-      `SELECT * FROM quotes WHERE project_id=$1 AND style_num=$2 ORDER BY factory_name`,
-      [req.params.id, req.params.styleNum]
+      `INSERT INTO project_items (project_id, item_index, last_price)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (project_id, item_index) DO UPDATE SET last_price = EXCLUDED.last_price
+       RETURNING *`,
+      [req.params.id, req.params.itemIndex, value]
     );
-    if (!rows.length) return res.status(404).json({ error: 'No quotes found for this style' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get comparison data for a specific item (all factories' quotes for one product)
+router.get('/:id/comparison/:itemIndex', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM quotes WHERE project_id=$1 AND item_index=$2 ORDER BY factory_name`,
+      [req.params.id, req.params.itemIndex]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'No quotes found for this item' });
     res.json(rows);
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Get all unique styles for a project (for comparison tabs)
+// Get all items for a project (for comparison tabs) — unions the outbound
+// template's items with whatever any factory has quoted, keyed by item_index
+// since Style # is often blank in real files.
 router.get('/:id/styles', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT DISTINCT style_num, description FROM quotes WHERE project_id=$1 ORDER BY style_num`,
+      `SELECT COALESCE(pi.item_index, q.item_index) AS item_index,
+              COALESCE(pi.style_num, q.style_num) AS style_num,
+              COALESCE(pi.description, q.description) AS description,
+              pi.last_price,
+              pi.moq,
+              COALESCE(img.image_count, 0)::int AS image_count
+       FROM (SELECT item_index, style_num, description, last_price, moq FROM project_items WHERE project_id=$1) pi
+       FULL OUTER JOIN
+            (SELECT DISTINCT ON (item_index) item_index, style_num, description
+             FROM quotes WHERE project_id=$1 AND item_index IS NOT NULL
+             ORDER BY item_index, submitted_at) q
+       ON pi.item_index = q.item_index
+       LEFT JOIN
+            (SELECT item_index, COUNT(*) AS image_count FROM project_item_images WHERE project_id=$1 GROUP BY item_index) img
+       ON img.item_index = pi.item_index
+       ORDER BY item_index`,
       [req.params.id]
     );
     res.json(rows);
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -244,26 +348,68 @@ router.post('/:id/quotes', requireAuth, async (req, res) => {
   }
 });
 
-// Upload Excel → parse → insert quotes for a project
+// Upload Excel → parse → insert quotes for a project, assigned to a factory
+// that Jack picks (so the Compare sheet knows whose quote it is). Extracts the
+// factory's photos and replaces any prior submission from that same factory.
 router.post('/:id/upload', requireAuth, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  try {
-    const { factoryName, quotes } = parseQuoteExcel(req.file.path);
+  const factoryName = (req.body.factory_name || '').trim();
+  if (!factoryName) {
     fs.unlink(req.file.path, () => {});
-    if (!quotes.length) return res.status(400).json({ error: 'No quote rows found in file' });
+    return res.status(400).json({ error: 'Factory required — pick which factory this quote is from' });
+  }
+  try {
+    const { quotes } = parseQuoteExcel(req.file.path);
+    if (!quotes.length) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: 'No quote rows found in file' });
+    }
+
+    const { rows: projRows } = await pool.query('SELECT name FROM projects WHERE id=$1', [req.params.id]);
+    if (!projRows.length) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Organize file into uploads/<Project>/<Factory>/ and extract images by row.
+    const projectName = projRows[0].name.replace(/[^a-zA-Z0-9-]/g, '_');
+    const cleanFactory = factoryName.replace(/[^a-zA-Z0-9-]/g, '_');
+    const destDir = path.join(uploadsRoot, projectName, cleanFactory);
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    const ext = path.extname(req.file.originalname);
+    const base = path.basename(req.file.originalname, ext);
+    const destPath = path.join(destDir, `${Date.now()}-${base}${ext}`);
+    fs.renameSync(req.file.path, destPath);
+    const imagesByRow = extractImagesByRow(destPath, path.join(destDir, 'images'));
+
+    // Align each quoted row to the correct outbound product (Style # then
+    // combined-description similarity) rather than by row position.
+    const { rows: items } = await pool.query(
+      'SELECT item_index, style_num, description FROM project_items WHERE project_id=$1',
+      [req.params.id]
+    );
 
     const client = await pool.connect();
+    let matched = 0, unmatched = 0;
     try {
       await client.query('BEGIN');
+      // Replace any prior submission from this factory so re-uploads don't duplicate.
+      await client.query('DELETE FROM quotes WHERE project_id=$1 AND factory_name=$2', [req.params.id, factoryName]);
       for (const q of quotes) {
+        const imagePath = (imagesByRow[q.excel_row] || [])[0] || null;
+        // Use the matched outbound product's index; fall back to the row's own
+        // position only when the project has no outbound template to match against.
+        const resolved = items.length ? resolveItemIndex(q, items) : q.item_index;
+        if (items.length) { resolved != null ? matched++ : unmatched++; }
         await client.query(
-          `INSERT INTO quotes (project_id, factory_name, style_num, description, category, color, scent_fragrance, packaging, moq, price, benchmark_link)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-          [req.params.id, q.factory_name, q.style_num||null, q.description||null, q.category||null, q.color||null, q.scent_fragrance||null, q.packaging||null, q.moq||null, q.price||null, q.benchmark_link||null]
+          `INSERT INTO quotes (project_id, factory_name, item_index, style_num, description, category, color, scent_fragrance, packaging, moq, price, benchmark_link, image_path)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [req.params.id, factoryName, resolved, q.style_num||null, q.description||null, q.category||null, q.color||null, q.scent_fragrance||null, q.packaging||null, q.moq||null, q.price||null, q.benchmark_link||null, imagePath]
         );
       }
+      await client.query('UPDATE project_factories SET submitted_at=NOW() WHERE project_id=$1 AND factory_name=$2', [req.params.id, factoryName]);
       await client.query('COMMIT');
-      res.json({ success: true, factory_name: factoryName, count: quotes.length });
+      res.json({ success: true, factory_name: factoryName, count: quotes.length, matched, unmatched });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -308,6 +454,40 @@ router.get('/:id/quote-image/:qid', async (req, res) => {
       return res.status(404).json({ error: 'Image file not found' });
     }
     res.sendFile(imagePath);
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Serve the Nth reference photo (0-based position) for an outbound item.
+// No requireAuth — consumed via <img src>, which can't send the bearer token
+// (same posture as quote-image).
+router.get('/:id/item-image/:itemIndex/:position', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT image_path FROM project_item_images WHERE project_id=$1 AND item_index=$2 AND position=$3',
+      [req.params.id, req.params.itemIndex, req.params.position]
+    );
+    if (!rows.length || !rows[0].image_path || !fs.existsSync(rows[0].image_path)) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+    res.sendFile(rows[0].image_path);
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Back-compat: single reference image for an item (position 0).
+router.get('/:id/item-image/:itemIndex', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT image_path FROM project_item_images WHERE project_id=$1 AND item_index=$2 AND position=0',
+      [req.params.id, req.params.itemIndex]
+    );
+    if (!rows.length || !rows[0].image_path || !fs.existsSync(rows[0].image_path)) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+    res.sendFile(rows[0].image_path);
   } catch {
     res.status(500).json({ error: 'Server error' });
   }

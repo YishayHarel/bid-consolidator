@@ -4,6 +4,8 @@ import api from '../utils/api';
 export default function UploadTab() {
   const [projects, setProjects] = useState([]);
   const [selectedId, setSelectedId] = useState('');
+  const [factories, setFactories] = useState([]);
+  const [factory, setFactory] = useState('');
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [result, setResult] = useState(null);
@@ -15,17 +17,20 @@ export default function UploadTab() {
       setProjects(r.data);
       if (r.data.length > 0) setSelectedId(String(r.data[0].id));
     }).catch(() => {});
+    api.get('/factories').then(r => setFactories(r.data)).catch(() => {});
   }, []);
 
   async function handleFile(file) {
     if (!file) return;
     if (!/\.(xlsx|xls)$/i.test(file.name)) { setError('Only .xlsx or .xls files are accepted.'); return; }
     if (!selectedId) { setError('Please select a project first.'); return; }
+    if (!factory.trim()) { setError('Please enter which factory this quote is from.'); return; }
     setError('');
     setResult(null);
     setUploading(true);
     const form = new FormData();
     form.append('file', file);
+    form.append('factory_name', factory.trim());
     try {
       const { data } = await api.post(`/projects/${selectedId}/upload`, form);
       setResult(data);
@@ -54,6 +59,15 @@ export default function UploadTab() {
           )}
         </div>
 
+        <div style={s.field}>
+          <label style={s.label}>Factory *</label>
+          <input style={s.select} type="text" list="upload-factories-list" placeholder="Which factory sent this quote?"
+            value={factory} onChange={e => setFactory(e.target.value)} />
+          <datalist id="upload-factories-list">
+            {factories.map(f => <option key={f.id} value={f.name} />)}
+          </datalist>
+        </div>
+
         <div
           style={{ ...s.dropzone, ...(dragOver ? s.dropOver : {}), ...(uploading ? s.dropUploading : {}) }}
           onDragOver={e => { e.preventDefault(); setDragOver(true); }}
@@ -80,8 +94,9 @@ export default function UploadTab() {
         )}
 
         <div style={s.hint}>
-          <strong>Expected format:</strong> Factory name in A1, then a header row with columns:
-          Style #, Description, Category, Color, Scent/Fragrance, Packaging, MOQ, Price 1, Benchmark Product Link.
+          <strong>How it works:</strong> pick the project and the factory, then drop their Excel quote.
+          Each product row becomes a quote, its photos are pulled in as "Their Image", and re-uploading
+          the same factory replaces their previous submission.
         </div>
       </div>
     </div>

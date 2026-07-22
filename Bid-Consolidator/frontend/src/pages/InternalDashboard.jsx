@@ -6,6 +6,7 @@ import UploadTab from '../components/UploadTab';
 import LandedCostTab from '../components/LandedCostTab';
 import EmailsTab from '../components/EmailsTab';
 import VendorLinksTab from '../components/VendorLinksTab';
+import FactoriesTab from '../components/FactoriesTab';
 
 const TABS = [
   { id: 'projects',      label: 'Projects' },
@@ -14,6 +15,7 @@ const TABS = [
   { id: 'emails',        label: 'Emails' },
   { id: 'landed-cost',   label: 'Landed Cost' },
   { id: 'vendor-links',  label: 'Vendor Links' },
+  { id: 'settings',      label: 'Settings' },
 ];
 
 export default function InternalDashboard() {
@@ -83,6 +85,7 @@ export default function InternalDashboard() {
         {currentTab === 'emails'       && <EmailsTab />}
         {currentTab === 'landed-cost'  && <LandedCostTab />}
         {currentTab === 'vendor-links' && <VendorLinksTab />}
+        {currentTab === 'settings'     && <FactoriesTab />}
       </main>
     </div>
   );

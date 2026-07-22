@@ -61,10 +61,14 @@ export default function CompareTab() {
           </div>
           {styles.map(style => (
             <ComparisonItemView
-              key={style.style_num}
+              key={style.item_index}
               projectId={selectedId}
+              itemIndex={style.item_index}
               styleNum={style.style_num}
               description={style.description}
+              imageCount={style.image_count}
+              lastPrice={style.last_price}
+              moq={style.moq}
             />
           ))}
         </div>

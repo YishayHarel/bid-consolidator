@@ -7,14 +7,19 @@ export default function ProjectsTab() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', buyer: '', division: '', last_price: '', templateFile: null });
+  const [form, setForm] = useState({ name: '', buyer: '', division: '', templateFile: null });
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState(null);
   const [editPrice, setEditPrice] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [factories, setFactories] = useState([]);
   const [showAddFactories, setShowAddFactories] = useState(false);
-  const [newFactories, setNewFactories] = useState('');
+  const [allFactories, setAllFactories] = useState([]);
+  const [factorySearch, setFactorySearch] = useState('');
+  const [selectedToInvite, setSelectedToInvite] = useState([]);
+  const [showOtherForm, setShowOtherForm] = useState(false);
+  const [otherName, setOtherName] = useState('');
+  const [otherEmail, setOtherEmail] = useState('');
 
   useEffect(() => { load(); }, []);
 
@@ -35,7 +40,6 @@ export default function ProjectsTab() {
       formData.append('name', form.name);
       formData.append('buyer', form.buyer || null);
       formData.append('division', form.division || null);
-      formData.append('last_price', form.last_price ? parseFloat(form.last_price) : null);
       if (form.templateFile) {
         formData.append('templateFile', form.templateFile);
       }
@@ -43,7 +47,7 @@ export default function ProjectsTab() {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       setProjects(ps => [{ ...data, quote_count: 0 }, ...ps]);
-      setForm({ name: '', buyer: '', division: '', last_price: '', templateFile: null });
+      setForm({ name: '', buyer: '', division: '', templateFile: null });
       setShowForm(false);
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to create project');
@@ -76,16 +80,40 @@ export default function ProjectsTab() {
     } catch {}
   }
 
-  async function inviteFactories(projectId) {
-    const names = newFactories
-      .split('\n')
-      .map(n => n.trim())
-      .filter(n => n.length > 0);
-    if (!names.length) return;
+  async function loadAllFactories() {
     try {
-      const { data } = await api.post(`/projects/${projectId}/factories`, { factory_names: names });
-      setFactories(fs => [...fs, ...data]);
-      setNewFactories('');
+      const { data } = await api.get('/factories');
+      setAllFactories(data);
+    } catch {}
+  }
+
+  function toggleSelectFactory(f) {
+    setSelectedToInvite(sel => {
+      const exists = sel.some(s => s.factory_id === f.id);
+      if (exists) return sel.filter(s => s.factory_id !== f.id);
+      return [...sel, { factory_id: f.id, name: f.name, email: f.email }];
+    });
+  }
+
+  function addOtherFactory() {
+    if (!otherName.trim()) return;
+    setSelectedToInvite(sel => [...sel, { name: otherName.trim(), email: otherEmail.trim() }]);
+    setOtherName('');
+    setOtherEmail('');
+    setShowOtherForm(false);
+  }
+
+  function removeSelected(idx) {
+    setSelectedToInvite(sel => sel.filter((_, i) => i !== idx));
+  }
+
+  async function inviteFactories(projectId) {
+    if (!selectedToInvite.length) return;
+    try {
+      const { data } = await api.post(`/projects/${projectId}/factories`, { factories: selectedToInvite });
+      await loadFactories(projectId);
+      setSelectedToInvite([]);
+      setFactorySearch('');
       setShowAddFactories(false);
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to invite factories');
@@ -133,15 +161,10 @@ export default function ProjectsTab() {
               </datalist>
             </div>
             <div style={s.field}>
-              <label style={s.label}>Last Price ($)</label>
-              <input style={s.input} type="number" step="0.01" placeholder="0.00"
-                value={form.last_price} onChange={e => setForm(f => ({ ...f, last_price: e.target.value }))} />
-            </div>
-            <div style={s.field}>
-              <label style={s.label}>Template File (Optional)</label>
+              <label style={s.label}>Outbound File — sent to factories (Optional)</label>
               <input style={s.input} type="file" accept=".xlsx,.xls"
                 onChange={e => setForm(f => ({ ...f, templateFile: e.target.files[0] }))} />
-              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>Upload your product template with images (Excel file)</div>
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>The Excel with your product list + photos. We attach it to the invite email and use its photos as your "Our Image" reference column.</div>
             </div>
           </div>
           <button style={s.saveBtn} disabled={saving}>{saving ? 'Creating...' : 'Create Project'}</button>
@@ -160,16 +183,65 @@ export default function ProjectsTab() {
                 <div style={s.factoriesSection}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>Invited Factories ({factories.length})</h4>
-                    <button style={s.addBtn} onClick={() => setShowAddFactories(v => !v)}>
+                    <button style={s.addBtn} onClick={() => {
+                      setShowAddFactories(v => !v);
+                      if (!showAddFactories) loadAllFactories();
+                    }}>
                       {showAddFactories ? 'Cancel' : '+ Add Factories'}
                     </button>
                   </div>
 
                   {showAddFactories && (
                     <div style={s.addForm}>
-                      <textarea style={s.textarea} placeholder="Enter factory names, one per line"
-                        value={newFactories} onChange={e => setNewFactories(e.target.value)} />
-                      <button style={s.saveBtn} onClick={() => inviteFactories(p.id)}>Invite</button>
+                      <input style={s.input} placeholder="Search factories..."
+                        value={factorySearch} onChange={e => setFactorySearch(e.target.value)} />
+
+                      <div style={s.factoryDropdown}>
+                        {allFactories
+                          .filter(f => f.name.toLowerCase().includes(factorySearch.toLowerCase()))
+                          .map(f => {
+                            const checked = selectedToInvite.some(s => s.factory_id === f.id);
+                            return (
+                              <label key={f.id} style={s.factoryOption}>
+                                <input type="checkbox" checked={checked} onChange={() => toggleSelectFactory(f)} />
+                                <span>{f.name}</span>
+                                {f.email && <span style={s.factoryOptionEmail}>{f.email}</span>}
+                              </label>
+                            );
+                          })}
+                        {allFactories.length === 0 && (
+                          <div style={{ color: '#94a3b8', fontSize: 12, padding: 6 }}>No factories in directory yet.</div>
+                        )}
+                      </div>
+
+                      <button type="button" style={s.otherBtn} onClick={() => setShowOtherForm(v => !v)}>
+                        {showOtherForm ? 'Cancel' : '+ Other (new factory)'}
+                      </button>
+
+                      {showOtherForm && (
+                        <div style={s.otherForm}>
+                          <input style={s.input} placeholder="Factory name"
+                            value={otherName} onChange={e => setOtherName(e.target.value)} />
+                          <input style={s.input} placeholder="Email"
+                            value={otherEmail} onChange={e => setOtherEmail(e.target.value)} />
+                          <button type="button" style={s.saveBtn} onClick={addOtherFactory}>Add</button>
+                        </div>
+                      )}
+
+                      {selectedToInvite.length > 0 && (
+                        <div style={s.chipRow}>
+                          {selectedToInvite.map((s2, idx) => (
+                            <span key={idx} style={s.chip}>
+                              {s2.name}
+                              <button type="button" style={s.chipRemove} onClick={() => removeSelected(idx)}>✕</button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <button style={s.saveBtn} disabled={!selectedToInvite.length} onClick={() => inviteFactories(p.id)}>
+                        Invite {selectedToInvite.length > 0 ? `(${selectedToInvite.length})` : ''}
+                      </button>
                     </div>
                   )}
 
@@ -181,7 +253,9 @@ export default function ProjectsTab() {
                         <thead>
                           <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                             <th style={s.th}>Factory Name</th>
+                            <th style={s.th}>Email</th>
                             <th style={s.th}>Status</th>
+                            <th style={s.th}>Items Received</th>
                             <th style={s.th}>Invited</th>
                             <th style={s.th}>Submitted</th>
                           </tr>
@@ -189,7 +263,8 @@ export default function ProjectsTab() {
                         <tbody>
                           {factories.map(f => (
                             <tr key={f.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                              <td style={s.td}><strong>{f.factory_name}</strong></td>
+                              <td style={s.td}><strong>{f.display_name || f.factory_name}</strong></td>
+                              <td style={s.td}>{f.email || '—'}</td>
                               <td style={s.td}>
                                 <span style={{
                                   ...s.badge,
@@ -198,6 +273,9 @@ export default function ProjectsTab() {
                                 }}>
                                   {f.status}
                                 </span>
+                              </td>
+                              <td style={s.td}>
+                                {f.total_items > 0 ? `${f.items_received}/${f.total_items}` : '—'}
                               </td>
                               <td style={s.td}>{new Date(f.invited_at).toLocaleDateString()}</td>
                               <td style={s.td}>{f.submitted_at ? new Date(f.submitted_at).toLocaleDateString() : '—'}</td>
@@ -287,8 +365,16 @@ export default function ProjectsTab() {
 const s = {
   backBtn: { padding: '6px 12px', background: 'transparent', color: '#3b82f6', border: 'none', fontSize: 13, cursor: 'pointer', marginBottom: 16 },
   addBtn: { padding: '8px 18px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  addForm: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 14, marginBottom: 16 },
+  addForm: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 14, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 },
   textarea: { width: '100%', padding: '10px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, fontFamily: 'monospace', marginBottom: 10, boxSizing: 'border-box', minHeight: 80 },
+  factoryDropdown: { maxHeight: 180, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff', padding: 6 },
+  factoryOption: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', fontSize: 13, color: '#334155', cursor: 'pointer' },
+  factoryOptionEmail: { color: '#94a3b8', fontSize: 11, marginLeft: 'auto' },
+  otherBtn: { alignSelf: 'flex-start', padding: '6px 12px', background: '#fff', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: 6, fontSize: 12, cursor: 'pointer' },
+  otherForm: { display: 'flex', gap: 8, flexWrap: 'wrap' },
+  chipRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
+  chip: { display: 'flex', alignItems: 'center', gap: 6, background: '#dbeafe', color: '#1e40af', borderRadius: 20, padding: '4px 10px', fontSize: 12, fontWeight: 600 },
+  chipRemove: { background: 'none', border: 'none', color: '#1e40af', cursor: 'pointer', fontSize: 12, padding: 0, lineHeight: 1 },
   factoriesSection: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: 20, marginBottom: 20 },
   th: { padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' },
   td: { padding: '10px 12px', fontSize: 13, color: '#334155' },
