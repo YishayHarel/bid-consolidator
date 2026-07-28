@@ -47,6 +47,52 @@ router.post('/login', async (req, res) => {
   }
 });
 
+router.post('/register', async (req, res) => {
+  const { email, password, name } = req.body;
+  const cleanEmail = (email || '').toLowerCase().trim();
+  const cleanName = (name || '').trim();
+
+  if (!cleanEmail || !password || !cleanName) {
+    return res.status(400).json({ error: 'Name, email, and password are required' });
+  }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) {
+    return res.status(400).json({ error: 'Please enter a valid email address' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  try {
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [cleanEmail]);
+    if (existing.rows[0]) return res.status(409).json({ error: 'An account with this email already exists' });
+
+    const hash = await bcrypt.hash(password, 10);
+    // New accounts join the default (lowest-id) organization for branding.
+    const orgRes = await pool.query('SELECT id FROM organizations ORDER BY id LIMIT 1');
+    const orgId = orgRes.rows[0]?.id || null;
+
+    const result = await pool.query(
+      `INSERT INTO users (email, password, name, role, org_id)
+       VALUES ($1, $2, $3, 'internal', $4)
+       RETURNING id, email, name, role, org_id`,
+      [cleanEmail, hash, cleanName, orgId]
+    );
+    const user = result.rows[0];
+    const org = await getOrg(user.org_id);
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, name: user.name, role: user.role, org_id: user.org_id },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+    );
+
+    res.status(201).json({ token, user, org });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const result = await pool.query('SELECT id, email, name, role, org_id FROM users WHERE id = $1', [req.user.id]);

@@ -3,22 +3,33 @@ import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 
 export default function LoginPage() {
+  const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  const isSignup = mode === 'signup';
+
+  function switchMode() {
+    setMode(isSignup ? 'signin' : 'signup');
+    setError('');
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      const { data } = await api.post('/auth/login', { email, password });
+      const { data } = isSignup
+        ? await api.post('/auth/register', { name, email, password })
+        : await api.post('/auth/login', { email, password });
       localStorage.setItem('token', data.token);
       navigate('/internal');
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed');
+      setError(err.response?.data?.error || (isSignup ? 'Sign up failed' : 'Login failed'));
     } finally {
       setLoading(false);
     }
@@ -35,7 +46,23 @@ export default function LoginPage() {
           </div>
         </div>
 
+        <div style={styles.heading}>{isSignup ? 'Create your account' : 'Sign in to your account'}</div>
+
         <form onSubmit={handleSubmit}>
+          {isSignup && (
+            <div style={styles.field}>
+              <label style={styles.label}>Name</label>
+              <input
+                style={styles.input}
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Jane Doe"
+                required
+                autoFocus
+              />
+            </div>
+          )}
           <div style={styles.field}>
             <label style={styles.label}>Email</label>
             <input
@@ -45,7 +72,7 @@ export default function LoginPage() {
               onChange={e => setEmail(e.target.value)}
               placeholder="you@company.com"
               required
-              autoFocus
+              autoFocus={!isSignup}
             />
           </div>
           <div style={styles.field}>
@@ -55,14 +82,24 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
+              placeholder={isSignup ? 'At least 6 characters' : ''}
               required
             />
           </div>
           {error && <div style={styles.error}>{error}</div>}
           <button style={{ ...styles.btn, opacity: loading ? 0.7 : 1 }} disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading
+              ? (isSignup ? 'Creating account...' : 'Signing in...')
+              : (isSignup ? 'Create Account' : 'Sign In')}
           </button>
         </form>
+
+        <div style={styles.switchRow}>
+          {isSignup ? 'Already have an account?' : "Don't have an account?"}
+          <button type="button" style={styles.switchBtn} onClick={switchMode}>
+            {isSignup ? 'Sign in' : 'Sign up'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -103,6 +140,7 @@ const styles = {
   },
   logoTitle: { fontSize: 16, fontWeight: 700, color: '#0f172a' },
   logoSub: { fontSize: 12, color: '#64748b', marginTop: 1 },
+  heading: { fontSize: 15, fontWeight: 600, color: '#0f172a', marginBottom: 20 },
   field: { marginBottom: 16 },
   label: { display: 'block', fontSize: 13, fontWeight: 500, color: '#475569', marginBottom: 6 },
   input: {
@@ -133,5 +171,21 @@ const styles = {
     fontWeight: 600,
     marginTop: 8,
     cursor: 'pointer',
+  },
+  switchRow: {
+    marginTop: 20,
+    textAlign: 'center',
+    fontSize: 13,
+    color: '#64748b',
+  },
+  switchBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#0f172a',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    padding: '0 0 0 6px',
+    textDecoration: 'underline',
   },
 };
