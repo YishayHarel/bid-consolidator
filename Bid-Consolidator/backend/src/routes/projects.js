@@ -35,6 +35,22 @@ const templateUpload = multer({
   },
 });
 
+// Ownership guard for any authenticated /:id route: the project must exist AND
+// belong to the logged-in user. Returns 404 (not 403) so we don't leak that a
+// project id exists for someone else. Runs after requireAuth (needs req.user).
+async function ownProject(req, res, next) {
+  try {
+    const { rows } = await pool.query('SELECT created_by FROM projects WHERE id=$1', [req.params.id]);
+    if (!rows.length || rows[0].created_by !== req.user.id) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+    next();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+}
+
 // List all projects with factory status
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -46,9 +62,10 @@ router.get('/', requireAuth, async (req, res) => {
       FROM projects p
       LEFT JOIN quotes q ON q.project_id = p.id
       LEFT JOIN project_factories pf ON pf.project_id = p.id
+      WHERE p.created_by = $1
       GROUP BY p.id
       ORDER BY p.created_at DESC
-    `);
+    `, [req.user.id]);
     res.json(rows);
   } catch {
     res.status(500).json({ error: 'Server error' });
@@ -121,7 +138,7 @@ router.post('/', requireAuth, templateUpload.single('templateFile'), async (req,
 });
 
 // Update project
-router.patch('/:id', requireAuth, async (req, res) => {
+router.patch('/:id', requireAuth, ownProject, async (req, res) => {
   const { name, buyer, division, last_price, status } = req.body;
   try {
     const { rows } = await pool.query(
@@ -138,7 +155,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
 });
 
 // Delete project
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, ownProject, async (req, res) => {
   try {
     await pool.query('DELETE FROM projects WHERE id=$1', [req.params.id]);
     res.json({ success: true });
@@ -148,7 +165,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 });
 
 // Get factories invited to a project
-router.get('/:id/factories', requireAuth, async (req, res) => {
+router.get('/:id/factories', requireAuth, ownProject, async (req, res) => {
   try {
     const { rows: totalRows } = await pool.query(
       'SELECT COUNT(*)::int AS total FROM project_items WHERE project_id=$1',
@@ -181,7 +198,7 @@ router.get('/:id/factories', requireAuth, async (req, res) => {
 
 // Invite factories to a project + auto-generate tokens
 // body: { factories: [{ factory_id?: number, name: string, email?: string }] }
-router.post('/:id/factories', requireAuth, async (req, res) => {
+router.post('/:id/factories', requireAuth, ownProject, async (req, res) => {
   const { factories: toInvite } = req.body;
   if (!Array.isArray(toInvite) || toInvite.length === 0) {
     return res.status(400).json({ error: 'factories must be a non-empty array' });
@@ -238,7 +255,7 @@ router.post('/:id/factories', requireAuth, async (req, res) => {
 });
 
 // Delete a factory from a project
-router.delete('/:id/factories/:fid', requireAuth, async (req, res) => {
+router.delete('/:id/factories/:fid', requireAuth, ownProject, async (req, res) => {
   try {
     await pool.query('DELETE FROM project_factories WHERE id=$1 AND project_id=$2', [req.params.fid, req.params.id]);
     res.json({ success: true });
@@ -248,7 +265,7 @@ router.delete('/:id/factories/:fid', requireAuth, async (req, res) => {
 });
 
 // Get quotes for a project (with the outbound item's description/style joined in)
-router.get('/:id/quotes', requireAuth, async (req, res) => {
+router.get('/:id/quotes', requireAuth, ownProject, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT q.*, pi.description AS item_description, pi.style_num AS item_style_num
@@ -265,7 +282,7 @@ router.get('/:id/quotes', requireAuth, async (req, res) => {
 
 // Update an outbound item's fields (currently just the manual Last Price).
 // Upsert so it works even for projects with no template row yet.
-router.patch('/:id/items/:itemIndex', requireAuth, async (req, res) => {
+router.patch('/:id/items/:itemIndex', requireAuth, ownProject, async (req, res) => {
   const { last_price } = req.body;
   const value = last_price != null && last_price !== '' ? last_price : null;
   try {
@@ -284,7 +301,7 @@ router.patch('/:id/items/:itemIndex', requireAuth, async (req, res) => {
 });
 
 // Get comparison data for a specific item (all factories' quotes for one product)
-router.get('/:id/comparison/:itemIndex', requireAuth, async (req, res) => {
+router.get('/:id/comparison/:itemIndex', requireAuth, ownProject, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT * FROM quotes WHERE project_id=$1 AND item_index=$2 ORDER BY factory_name`,
@@ -300,7 +317,7 @@ router.get('/:id/comparison/:itemIndex', requireAuth, async (req, res) => {
 // Get all items for a project (for comparison tabs) — unions the outbound
 // template's items with whatever any factory has quoted, keyed by item_index
 // since Style # is often blank in real files.
-router.get('/:id/styles', requireAuth, async (req, res) => {
+router.get('/:id/styles', requireAuth, ownProject, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT COALESCE(pi.item_index, q.item_index) AS item_index,
@@ -329,7 +346,7 @@ router.get('/:id/styles', requireAuth, async (req, res) => {
 });
 
 // Add a quote manually
-router.post('/:id/quotes', requireAuth, async (req, res) => {
+router.post('/:id/quotes', requireAuth, ownProject, async (req, res) => {
   const { factory_name, style_num, description, category, color, scent_fragrance, packaging, moq, price, benchmark_link } = req.body;
   if (!factory_name) return res.status(400).json({ error: 'factory_name required' });
   try {
@@ -347,7 +364,7 @@ router.post('/:id/quotes', requireAuth, async (req, res) => {
 // Upload Excel → parse → insert quotes for a project, assigned to a factory
 // that Jack picks (so the Compare sheet knows whose quote it is). Extracts the
 // factory's photos and replaces any prior submission from that same factory.
-router.post('/:id/upload', requireAuth, upload.single('file'), async (req, res) => {
+router.post('/:id/upload', requireAuth, ownProject, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const factoryName = (req.body.factory_name || '').trim();
   if (!factoryName) {
@@ -423,7 +440,7 @@ router.post('/:id/upload', requireAuth, upload.single('file'), async (req, res) 
 });
 
 // Update quote (landed cost data + comparison data)
-router.patch('/:id/quotes/:qid', requireAuth, async (req, res) => {
+router.patch('/:id/quotes/:qid', requireAuth, ownProject, async (req, res) => {
   const { total_fob, base_duty_pct, addl_duty_pct, units_per_container, sell_price, retail_price, etc_amt, comparison_notes, is_selected_winner } = req.body;
   try {
     const { rows } = await pool.query(
@@ -494,7 +511,14 @@ router.get('/:id/item-image/:itemIndex', async (req, res) => {
 // Delete a single quote
 router.delete('/quotes/:qid', requireAuth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM quotes WHERE id=$1', [req.params.qid]);
+    // Only allow deleting quotes that belong to one of the user's own projects.
+    const { rowCount } = await pool.query(
+      `DELETE FROM quotes q
+       USING projects p
+       WHERE q.id=$1 AND q.project_id=p.id AND p.created_by=$2`,
+      [req.params.qid, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Quote not found' });
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: 'Server error' });
