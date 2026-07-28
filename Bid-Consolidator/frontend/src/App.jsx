@@ -24,8 +24,9 @@ export default function App() {
             </RequireAuth>
           }
         />
-        {/* Root: send staff to dashboard, vendors to vendor portal */}
-        <Route path="/" element={<Navigate to={isLoggedIn ? '/internal' : '/vendor'} replace />} />
+        {/* Root: logged-in staff go to the dashboard, everyone else to the login page.
+            Vendors reach the upload portal directly via /vendor (their invite links point there). */}
+        <Route path="/" element={<Navigate to={isLoggedIn ? '/internal' : '/admin'} replace />} />
         <Route path="/login" element={<Navigate to="/admin" replace />} />
       </Routes>
     </BrowserRouter>
