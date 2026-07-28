@@ -5,8 +5,9 @@ const fs = require('fs');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { parseQuoteExcel } = require('../utils/parseExcel');
-const { extractImagesFromExcel, extractImagesByRow } = require('../utils/extractImages');
+const { extractImagesByRow } = require('../utils/extractImages');
 const { resolveItemIndex } = require('../utils/matchItems');
+const { saveObject, contentTypeFor } = require('../utils/storage');
 
 const router = express.Router();
 
@@ -116,19 +117,15 @@ router.post('/submit/:token', upload.single('file'), async (req, res) => {
     const { rows: projRows } = await pool.query('SELECT name FROM projects WHERE id=$1', [t.project_id]);
     if (!projRows.length) throw new Error('Project not found');
     const projectName = projRows[0].name.replace(/[^a-zA-Z0-9-]/g, '_');
-    const factoryName = t.factory_name.replace(/[^a-zA-Z0-9-]/g, '_');
+    const cleanFactory = t.factory_name.replace(/[^a-zA-Z0-9-]/g, '_');
+    const prefix = `${projectName}/${cleanFactory}`;
 
-    // Organize file into uploads/ProjectName/FactoryName/
-    const destDir = path.join(uploadsRoot, projectName, factoryName);
-    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    // Store the file, extract images (row-aware), align rows to outbound products.
     const ext = path.extname(req.file.originalname);
     const base = path.basename(req.file.originalname, ext);
-    const destName = `${Date.now()}-${base}${ext}`;
-    const destPath = path.join(destDir, destName);
-    fs.renameSync(req.file.path, destPath);
-
-    // Extract images (row-aware) + align rows to outbound products.
-    const imagesByRow = extractImagesByRow(destPath, path.join(destDir, 'images'));
+    await saveObject(`${prefix}/${Date.now()}-${base}${ext}`, fs.readFileSync(req.file.path), contentTypeFor(ext));
+    const imagesByRow = extractImagesByRow(req.file.path);
+    fs.unlink(req.file.path, () => {});
     const { rows: items } = await pool.query(
       'SELECT item_index, style_num, description FROM project_items WHERE project_id=$1',
       [t.project_id]
@@ -139,7 +136,12 @@ router.post('/submit/:token', upload.single('file'), async (req, res) => {
       await client.query('BEGIN');
       await client.query('DELETE FROM quotes WHERE project_id=$1 AND factory_name=$2', [t.project_id, t.factory_name]);
       for (const q of quotes) {
-        const imagePath = (imagesByRow[q.excel_row] || [])[0] || null;
+        const photo = (imagesByRow[q.excel_row] || [])[0];
+        let imagePath = null;
+        if (photo) {
+          imagePath = `${prefix}/images/${q.excel_row}-0.${photo.ext}`;
+          await saveObject(imagePath, photo.data, contentTypeFor(photo.ext));
+        }
         const resolved = items.length ? resolveItemIndex(q, items) : q.item_index;
         await client.query(
           `INSERT INTO quotes (project_id, factory_name, item_index, style_num, description, category, color, scent_fragrance, packaging, moq, price, benchmark_link, image_path)
@@ -184,18 +186,14 @@ router.post('/submit-open', upload.single('file'), async (req, res) => {
     if (!projRows.length) throw new Error('Project not found');
     const projectName = projRows[0].name.replace(/[^a-zA-Z0-9-]/g, '_');
     const cleanFactory = factory_name.replace(/[^a-zA-Z0-9-]/g, '_');
+    const prefix = `${projectName}/${cleanFactory}`;
 
-    // Organize file into uploads/ProjectName/FactoryName/
-    const destDir = path.join(uploadsRoot, projectName, cleanFactory);
-    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    // Store the file, extract images (row-aware), align rows to outbound products.
     const ext = path.extname(req.file.originalname);
     const base = path.basename(req.file.originalname, ext);
-    const destName = `${Date.now()}-${base}${ext}`;
-    const destPath = path.join(destDir, destName);
-    fs.renameSync(req.file.path, destPath);
-
-    // Extract images (row-aware) + align rows to outbound products.
-    const imagesByRow = extractImagesByRow(destPath, path.join(destDir, 'images'));
+    await saveObject(`${prefix}/${Date.now()}-${base}${ext}`, fs.readFileSync(req.file.path), contentTypeFor(ext));
+    const imagesByRow = extractImagesByRow(req.file.path);
+    fs.unlink(req.file.path, () => {});
     const { rows: items } = await pool.query(
       'SELECT item_index, style_num, description FROM project_items WHERE project_id=$1',
       [project_id]
@@ -206,7 +204,12 @@ router.post('/submit-open', upload.single('file'), async (req, res) => {
       await client.query('BEGIN');
       await client.query('DELETE FROM quotes WHERE project_id=$1 AND factory_name=$2', [project_id, factory_name]);
       for (const q of quotes) {
-        const imagePath = (imagesByRow[q.excel_row] || [])[0] || null;
+        const photo = (imagesByRow[q.excel_row] || [])[0];
+        let imagePath = null;
+        if (photo) {
+          imagePath = `${prefix}/images/${q.excel_row}-0.${photo.ext}`;
+          await saveObject(imagePath, photo.data, contentTypeFor(photo.ext));
+        }
         const resolved = items.length ? resolveItemIndex(q, items) : q.item_index;
         await client.query(
           `INSERT INTO quotes (project_id, factory_name, item_index, style_num, description, category, color, scent_fragrance, packaging, moq, price, benchmark_link, image_path)

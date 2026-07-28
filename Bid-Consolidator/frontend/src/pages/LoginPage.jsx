@@ -28,10 +28,10 @@ export default function LoginPage() {
     <div style={styles.page}>
       <div style={styles.card}>
         <div style={styles.logo}>
-          <div style={styles.logoMark}>S</div>
+          <div style={styles.logoMark}>BC</div>
           <div>
-            <div style={styles.logoTitle}>Shalom International</div>
-            <div style={styles.logoSub}>Bid Consolidator</div>
+            <div style={styles.logoTitle}>Bid Consolidator</div>
+            <div style={styles.logoSub}>Supplier Quote Comparison</div>
           </div>
         </div>
 
@@ -43,7 +43,7 @@ export default function LoginPage() {
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              placeholder="admin@shalom.com"
+              placeholder="you@company.com"
               required
               autoFocus
             />

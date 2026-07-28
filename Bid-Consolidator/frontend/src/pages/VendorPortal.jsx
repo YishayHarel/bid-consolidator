@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
+import { API_BASE } from '../utils/api';
 
 export default function VendorPortal() {
   const [params] = useSearchParams();
@@ -25,14 +26,14 @@ export default function VendorPortal() {
 
   useEffect(() => {
     if (token) {
-      axios.get(`/api/vendor/validate/${token}`)
+      axios.get(`${API_BASE}/vendor/validate/${token}`)
         .then(({ data }) => {
           if (data.status === 'valid') {
             setTokenStatus('valid');
             setTokenFactory(data.factory_name);
             setTokenProjectId(data.project_id);
             if (data.project_id) {
-              axios.get(`/api/projects/${data.project_id}`).then(r => setProjectInfo(r.data)).catch(() => {});
+              axios.get(`${API_BASE}/projects/${data.project_id}`).then(r => setProjectInfo(r.data)).catch(() => {});
             }
           } else {
             setTokenStatus(data.status);
@@ -40,7 +41,7 @@ export default function VendorPortal() {
         })
         .catch(() => setTokenStatus('invalid'));
     } else {
-      axios.get('/api/vendor/open-projects')
+      axios.get(`${API_BASE}/vendor/open-projects`)
         .then(({ data }) => {
           setProjects(data);
           if (data.length > 0) setSelectedProject(String(data[0].id));
@@ -71,11 +72,11 @@ export default function VendorPortal() {
 
     try {
       if (token) {
-        await axios.post(`/api/vendor/submit/${token}`, form);
+        await axios.post(`${API_BASE}/vendor/submit/${token}`, form);
       } else {
         form.append('factory_name', factoryName.trim());
         form.append('project_id', selectedProject);
-        await axios.post('/api/vendor/submit-open', form);
+        await axios.post(`${API_BASE}/vendor/submit-open`, form);
       }
       setUploadState('success');
     } catch (err) {

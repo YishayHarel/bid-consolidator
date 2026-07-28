@@ -167,6 +167,34 @@ async function migrate() {
       FROM ranked WHERE q.id = ranked.id;
     `);
 
+    // Multi-tenant foundation: each user belongs to an organization, and each
+    // organization carries its own branding so the app can be white-labelled
+    // per login later. Current single-tenant (Shalom) behavior is unchanged —
+    // this just puts the structure in place.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS organizations (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        logo_mark VARCHAR(8),
+        logo_title VARCHAR(255),
+        logo_sub VARCHAR(255),
+        brand_color VARCHAR(16),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id);`);
+    // Seed the default org with the current Shalom branding (only if none yet).
+    await client.query(`
+      INSERT INTO organizations (name, logo_mark, logo_title, logo_sub, brand_color)
+      SELECT 'Shalom International', 'S', 'Shalom International', 'Bid Consolidator', '#0f172a'
+      WHERE NOT EXISTS (SELECT 1 FROM organizations);
+    `);
+    // Attach any user without an org to the default org.
+    await client.query(`
+      UPDATE users SET org_id = (SELECT id FROM organizations ORDER BY id LIMIT 1)
+      WHERE org_id IS NULL;
+    `);
+
     await client.query('COMMIT');
     console.log('Migration complete.');
   } catch (err) {

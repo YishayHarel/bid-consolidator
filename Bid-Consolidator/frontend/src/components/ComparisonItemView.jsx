@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import api from '../utils/api';
+import api, { API_BASE } from '../utils/api';
 
 const FACTORY_TINTS = {
   blue: { bg: '#dbeafe', text: '#0369a1' },
@@ -120,7 +120,7 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
                 <td style={s.td}><div style={{ color: '#94a3b8', fontStyle: 'italic' }}>Awaiting quotes</div></td>
                 {ourImageCols.map(k => (
                   <td key={k} style={s.imageTd}>
-                    <img src={`/api/projects/${projectId}/item-image/${itemIndex}/${k}`} style={s.productImage}
+                    <img src={`${API_BASE}/projects/${projectId}/item-image/${itemIndex}/${k}`} style={s.productImage}
                       onError={(e) => { e.target.style.display = 'none'; }} />
                   </td>
                 ))}
@@ -148,7 +148,7 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
                   {ourImageCols.map(k => (
                     <td key={k} style={s.imageTd}>
                       <img
-                        src={`/api/projects/${projectId}/item-image/${itemIndex}/${k}`}
+                        src={`${API_BASE}/projects/${projectId}/item-image/${itemIndex}/${k}`}
                         style={s.productImage}
                         onError={(e) => { e.target.style.display = 'none'; }}
                       />
@@ -169,7 +169,7 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
                   <td style={s.imageTd}>
                     {quote.image_path ? (
                       <img
-                        src={`/api/projects/${projectId}/quote-image/${quote.id}`}
+                        src={`${API_BASE}/projects/${projectId}/quote-image/${quote.id}`}
                         style={s.productImage}
                         onError={(e) => { e.target.style.display = 'none'; }}
                       />

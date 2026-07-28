@@ -96,13 +96,14 @@ function extractRichValueImages(readEntry, zip, sheetBase) {
   return out;
 }
 
-// Row-aware extraction: returns { [rowIndex]: [absPath, ...] } grouping each
-// embedded image by the 0-based worksheet row it belongs to — both floating
-// images anchored to cells (drawing XML) and "Place in Cell" rich-value images.
-function extractImagesByRow(filePath, outputDir) {
+// Row-aware extraction: returns { [rowIndex]: [{ ext, data:Buffer }, ...] }
+// grouping each embedded image by the 0-based worksheet row it belongs to —
+// both floating images anchored to cells (drawing XML) and "Place in Cell"
+// rich-value images. Returns buffers (no disk writes) so callers can store
+// them wherever (Supabase Storage, local disk, etc.).
+function extractImagesByRow(filePath) {
   const byRow = {};
   try {
-    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
     const zip = new AdmZip(filePath);
     const readEntry = (name) => {
       const e = zip.getEntry(name.replace(/^\/+/, ''));
@@ -169,15 +170,12 @@ function extractImagesByRow(filePath, outputDir) {
     // "Our Image #1" is the leftmost photo.
     const rowGroups = {};
     found.forEach(f => { (rowGroups[f.row] = rowGroups[f.row] || []).push(f); });
-    let seq = 0;
     Object.keys(rowGroups).forEach(rowKey => {
       const row = parseInt(rowKey, 10);
       rowGroups[row].sort((a, b) => a.col - b.col);
       rowGroups[row].forEach(f => {
         const ext = (f.mediaPath.match(/\.([a-z0-9]+)$/i) || [, 'png'])[1];
-        const outPath = path.join(outputDir, `row${row}-${seq++}.${ext}`);
-        fs.writeFileSync(outPath, f.entry.getData());
-        (byRow[row] = byRow[row] || []).push(outPath);
+        (byRow[row] = byRow[row] || []).push({ ext, data: f.entry.getData() });
       });
     });
     return byRow;

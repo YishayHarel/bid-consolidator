@@ -26,7 +26,8 @@ export default function InternalDashboard() {
   const currentTab = TABS.find(t => location.pathname.includes(t.id))?.id || 'projects';
 
   useEffect(() => {
-    const ws = new WebSocket(`ws://${window.location.hostname}:4000/ws`);
+    const wsUrl = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:4000/ws`;
+    const ws = new WebSocket(wsUrl);
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);

@@ -5,9 +5,10 @@ const fs = require('fs');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { parseQuoteExcel } = require('../utils/parseExcel');
-const { extractImagesFromExcel, extractImagesByRow } = require('../utils/extractImages');
+const { extractImagesByRow } = require('../utils/extractImages');
 const { upsertFactory } = require('../utils/factories');
 const { resolveItemIndex } = require('../utils/matchItems');
+const { saveObject, resolveObject, removePrefix, contentTypeFor } = require('../utils/storage');
 
 const uploadsRoot = path.join(__dirname, '../../uploads');
 
@@ -65,27 +66,16 @@ router.post('/', requireAuth, templateUpload.single('templateFile'), async (req,
       [name, buyer || null, division || null, last_price || null, req.user.id]
     );
     const project = rows[0];
-
-    // Create folder for this project
     const cleanName = name.replace(/[^a-zA-Z0-9-]/g, '_');
-    const projectFolder = path.join(uploadsRoot, cleanName);
-    if (!fs.existsSync(projectFolder)) {
-      fs.mkdirSync(projectFolder, { recursive: true });
-    }
 
-    // Handle template file if provided
+    // Handle the outbound template file if provided.
     if (req.file) {
-      const templateDir = path.join(projectFolder, 'template');
-      if (!fs.existsSync(templateDir)) {
-        fs.mkdirSync(templateDir, { recursive: true });
-      }
-      const timestamp = Date.now();
-      const destPath = path.join(templateDir, `${timestamp}-${req.file.originalname}`);
-      fs.renameSync(req.file.path, destPath);
+      const templateKey = `${cleanName}/template/${Date.now()}-${req.file.originalname}`;
+      await saveObject(templateKey, fs.readFileSync(req.file.path), contentTypeFor(path.extname(req.file.originalname)));
 
       const { rows: updated } = await pool.query(
         'UPDATE projects SET template_path=$1 WHERE id=$2 RETURNING *',
-        [destPath, project.id]
+        [templateKey, project.id]
       );
       Object.assign(project, updated[0]);
 
@@ -94,27 +84,33 @@ router.post('/', requireAuth, templateUpload.single('templateFile'), async (req,
       // several photos yields several "Our Image #N" entries. Must never fail
       // project creation.
       try {
-        const { quotes: items } = parseQuoteExcel(destPath);
-        const imagesDir = path.join(templateDir, 'images');
-        const imagesByRow = extractImagesByRow(destPath, imagesDir);
+        const { quotes: items } = parseQuoteExcel(req.file.path);
+        const imagesByRow = extractImagesByRow(req.file.path);
         for (const it of items) {
           const photos = imagesByRow[it.excel_row] || [];
+          const keys = [];
+          for (let p = 0; p < photos.length; p++) {
+            const key = `${cleanName}/template/images/item${it.item_index}-${p}.${photos[p].ext}`;
+            await saveObject(key, photos[p].data, contentTypeFor(photos[p].ext));
+            keys.push(key);
+          }
           await pool.query(
             `INSERT INTO project_items (project_id, item_index, style_num, description, moq, image_path)
              VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (project_id, item_index) DO NOTHING`,
-            [project.id, it.item_index, it.style_num || null, it.description || null, it.moq || null, photos[0] || null]
+            [project.id, it.item_index, it.style_num || null, it.description || null, it.moq || null, keys[0] || null]
           );
-          for (let p = 0; p < photos.length; p++) {
+          for (let p = 0; p < keys.length; p++) {
             await pool.query(
               `INSERT INTO project_item_images (project_id, item_index, position, image_path)
                VALUES ($1,$2,$3,$4) ON CONFLICT (project_id, item_index, position) DO NOTHING`,
-              [project.id, it.item_index, p, photos[p]]
+              [project.id, it.item_index, p, keys[p]]
             );
           }
         }
       } catch (err) {
         console.error('Template parse failed (non-fatal):', err);
       }
+      fs.unlink(req.file.path, () => {});
     }
 
     res.status(201).json(project);
@@ -371,16 +367,15 @@ router.post('/:id/upload', requireAuth, upload.single('file'), async (req, res) 
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Organize file into uploads/<Project>/<Factory>/ and extract images by row.
+    // Store file + row images in object storage under <Project>/<Factory>/.
     const projectName = projRows[0].name.replace(/[^a-zA-Z0-9-]/g, '_');
     const cleanFactory = factoryName.replace(/[^a-zA-Z0-9-]/g, '_');
-    const destDir = path.join(uploadsRoot, projectName, cleanFactory);
-    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    const prefix = `${projectName}/${cleanFactory}`;
     const ext = path.extname(req.file.originalname);
     const base = path.basename(req.file.originalname, ext);
-    const destPath = path.join(destDir, `${Date.now()}-${base}${ext}`);
-    fs.renameSync(req.file.path, destPath);
-    const imagesByRow = extractImagesByRow(destPath, path.join(destDir, 'images'));
+    await saveObject(`${prefix}/${Date.now()}-${base}${ext}`, fs.readFileSync(req.file.path), contentTypeFor(ext));
+    const imagesByRow = extractImagesByRow(req.file.path);
+    fs.unlink(req.file.path, () => {});
 
     // Align each quoted row to the correct outbound product (Style # then
     // combined-description similarity) rather than by row position.
@@ -396,7 +391,12 @@ router.post('/:id/upload', requireAuth, upload.single('file'), async (req, res) 
       // Replace any prior submission from this factory so re-uploads don't duplicate.
       await client.query('DELETE FROM quotes WHERE project_id=$1 AND factory_name=$2', [req.params.id, factoryName]);
       for (const q of quotes) {
-        const imagePath = (imagesByRow[q.excel_row] || [])[0] || null;
+        const photo = (imagesByRow[q.excel_row] || [])[0];
+        let imagePath = null;
+        if (photo) {
+          imagePath = `${prefix}/images/${q.excel_row}-0.${photo.ext}`;
+          await saveObject(imagePath, photo.data, contentTypeFor(photo.ext));
+        }
         // Use the matched outbound product's index; fall back to the row's own
         // position only when the project has no outbound template to match against.
         const resolved = items.length ? resolveItemIndex(q, items) : q.item_index;
@@ -439,39 +439,39 @@ router.patch('/:id/quotes/:qid', requireAuth, async (req, res) => {
   }
 });
 
-// Get image for a quote (serve image file)
+// Serve a stored image: redirect to a signed Supabase URL, or stream the local
+// file in dev. No requireAuth — consumed via <img src>, which can't send the
+// bearer token.
+async function serveStored(res, stored) {
+  const r = await resolveObject(stored);
+  if (!r) return res.status(404).json({ error: 'Image not found' });
+  if (r.redirectUrl) return res.redirect(r.redirectUrl);
+  return res.sendFile(r.filePath);
+}
+
+// Get image for a quote
 router.get('/:id/quote-image/:qid', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT image_path FROM quotes WHERE id=$1 AND project_id=$2',
       [req.params.qid, req.params.id]
     );
-    if (!rows.length || !rows[0].image_path) {
-      return res.status(404).json({ error: 'Image not found' });
-    }
-    const imagePath = rows[0].image_path;
-    if (!fs.existsSync(imagePath)) {
-      return res.status(404).json({ error: 'Image file not found' });
-    }
-    res.sendFile(imagePath);
+    if (!rows.length) return res.status(404).json({ error: 'Image not found' });
+    return serveStored(res, rows[0].image_path);
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 // Serve the Nth reference photo (0-based position) for an outbound item.
-// No requireAuth — consumed via <img src>, which can't send the bearer token
-// (same posture as quote-image).
 router.get('/:id/item-image/:itemIndex/:position', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT image_path FROM project_item_images WHERE project_id=$1 AND item_index=$2 AND position=$3',
       [req.params.id, req.params.itemIndex, req.params.position]
     );
-    if (!rows.length || !rows[0].image_path || !fs.existsSync(rows[0].image_path)) {
-      return res.status(404).json({ error: 'Image not found' });
-    }
-    res.sendFile(rows[0].image_path);
+    if (!rows.length) return res.status(404).json({ error: 'Image not found' });
+    return serveStored(res, rows[0].image_path);
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
@@ -484,10 +484,8 @@ router.get('/:id/item-image/:itemIndex', async (req, res) => {
       'SELECT image_path FROM project_item_images WHERE project_id=$1 AND item_index=$2 AND position=0',
       [req.params.id, req.params.itemIndex]
     );
-    if (!rows.length || !rows[0].image_path || !fs.existsSync(rows[0].image_path)) {
-      return res.status(404).json({ error: 'Image not found' });
-    }
-    res.sendFile(rows[0].image_path);
+    if (!rows.length) return res.status(404).json({ error: 'Image not found' });
+    return serveStored(res, rows[0].image_path);
   } catch {
     res.status(500).json({ error: 'Server error' });
   }
