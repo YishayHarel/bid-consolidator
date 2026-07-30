@@ -134,7 +134,6 @@ export default function LandedCostTab() {
                 <th colSpan={2} style={th('#CCFFCC')}>SIC Margins</th>
                 <th colSpan={2} style={th('#e5e7eb')}>Retail Margins</th>
                 <th colSpan={9} style={th('#FFFF00')}>ONLY ENTER HIGHLIGHTED IN VSR</th>
-                <th style={th('#e2e8f0')}></th>
               </tr>
               <tr>
                 <th style={th2('#f8fafc')}>Factory</th>
@@ -163,7 +162,6 @@ export default function LandedCostTab() {
                 <th style={th2('#FFFF00')}>Units/40"</th>
                 <th style={th2('#FFFF00')}>Freight/Unit</th>
                 <th style={th2('#FFFF00')}>Freight %</th>
-                <th style={th2('#f8fafc')}></th>
               </tr>
             </thead>
             <tbody>
@@ -198,46 +196,43 @@ export default function LandedCostTab() {
                     {/* green */}
                     <td style={td('#CCFFCC')}>
                       <input style={inp('#CCFFCC')} type="number" step="0.01"
-                        value={row._sell_price} onChange={e => update(row.id, '_sell_price', e.target.value)} />
+                        value={row._sell_price} onChange={e => update(row.id, '_sell_price', e.target.value)}
+                        onBlur={() => saveRow(row)} />
                     </td>
                     <td style={td('#CCFFCC')}>{margin !== null ? fmtPct(margin * 100) : '—'}</td>
                     {/* gray */}
                     <td style={td('#f3f4f6')}>
                       <input style={inp('#f3f4f6')} type="number" step="0.01"
-                        value={row._retail_price} onChange={e => update(row.id, '_retail_price', e.target.value)} />
+                        value={row._retail_price} onChange={e => update(row.id, '_retail_price', e.target.value)}
+                        onBlur={() => saveRow(row)} />
                     </td>
                     <td style={td('#f3f4f6')}>{imu !== null ? fmtPct(imu * 100) : '—'}</td>
                     {/* yellow VSR inputs */}
                     <td style={td('#FFFF00')}>
                       <input style={inp('#FFFF00')} type="number" step="0.01"
-                        value={row._total_fob} onChange={e => update(row.id, '_total_fob', e.target.value)} />
+                        value={row._total_fob} onChange={e => update(row.id, '_total_fob', e.target.value)}
+                        onBlur={() => saveRow(row)} />
                     </td>
                     <td style={td('#FFFF00')}>{calc.vsr_fob > 0 ? fmt(calc.vsr_fob) : '—'}</td>
                     <td style={{ ...td('#FFFF00'), color: '#64748b', fontWeight: 600 }}>12%</td>
                     <td style={td('#FFFF00')}>
                       <input style={inp('#FFFF00')} type="number" step="0.1" placeholder="0"
-                        value={row._base_duty_pct} onChange={e => update(row.id, '_base_duty_pct', e.target.value)} />
+                        value={row._base_duty_pct} onChange={e => update(row.id, '_base_duty_pct', e.target.value)}
+                        onBlur={() => saveRow(row)} />
                     </td>
                     <td style={td('#FFFF00')}>
                       <input style={inp('#FFFF00')} type="number" step="0.1" placeholder="0"
-                        value={row._addl_duty_pct} onChange={e => update(row.id, '_addl_duty_pct', e.target.value)} />
+                        value={row._addl_duty_pct} onChange={e => update(row.id, '_addl_duty_pct', e.target.value)}
+                        onBlur={() => saveRow(row)} />
                     </td>
                     <td style={td('#FFFF00')}>{fmtPct(totalDutyPct)}</td>
                     <td style={td('#FFFF00')}>
                       <input style={inp('#FFFF00')} type="number"
-                        value={row._units_per_container} onChange={e => update(row.id, '_units_per_container', e.target.value)} />
+                        value={row._units_per_container} onChange={e => update(row.id, '_units_per_container', e.target.value)}
+                        onBlur={() => saveRow(row)} />
                     </td>
                     <td style={td('#FFFF00')}>{calc.freight_per_unit !== null ? fmt(calc.freight_per_unit) : '—'}</td>
                     <td style={td('#FFFF00')}>{calc.freight_pct !== null ? fmtPct(calc.freight_pct * 100) : '—'}</td>
-                    <td style={td('#f8fafc')}>
-                      <button
-                        style={{ padding: '4px 10px', background: saved[row.id] ? '#dcfce7' : '#0f172a', color: saved[row.id] ? '#166534' : '#fff', border: 'none', borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
-                        onClick={() => saveRow(row)}
-                        disabled={saving[row.id]}
-                      >
-                        {saving[row.id] ? '...' : saved[row.id] ? 'Saved' : 'Save'}
-                      </button>
-                    </td>
                   </tr>
                 );
               })}
