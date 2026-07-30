@@ -20,12 +20,39 @@ if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
   });
 }
 
+// Get (or reuse) an unused, unexpired portal token for a factory so it can
+// submit REVISED pricing. Their original invite token is single-use and already
+// spent once they've quoted, so we issue a fresh one for the best-and-final round.
+async function ensureRevisionLink(projectId, factoryName, frontendUrl) {
+  const { rows: existing } = await pool.query(
+    `SELECT token FROM vendor_tokens
+     WHERE project_id=$1 AND factory_name=$2 AND used_at IS NULL AND expires_at > NOW()
+     ORDER BY created_at DESC LIMIT 1`,
+    [projectId, factoryName]
+  );
+  let token = existing[0]?.token;
+  if (!token) {
+    const { rows: pf } = await pool.query(
+      'SELECT id FROM project_factories WHERE project_id=$1 AND factory_name=$2',
+      [projectId, factoryName]
+    );
+    const { rows: created } = await pool.query(
+      `INSERT INTO vendor_tokens (factory_name, project_id, project_factory_id, expires_at)
+       VALUES ($1,$2,$3, NOW() + interval '30 days') RETURNING token`,
+      [factoryName, projectId, pf[0]?.id || null]
+    );
+    token = created[0].token;
+  }
+  return `${frontendUrl}/vendor?token=${token}`;
+}
+
 // Get email drafts for a project
 router.get('/project/:projectId', requireAuth, async (req, res) => {
   const projectId = req.params.projectId;
   try {
     const { rows: project } = await pool.query('SELECT * FROM projects WHERE id=$1', [projectId]);
     if (!project.length) return res.status(404).json({ error: 'Project not found' });
+    if (project[0].created_by !== req.user.id) return res.status(404).json({ error: 'Project not found' });
 
     const { rows: factories } = await pool.query(
       `SELECT pf.*,
@@ -107,6 +134,63 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
         body: `Hi Team,\n\nWe've received ${quotes.length} quote(s) for ${p.name}. The comparison is now available in the system.\n\nReview the Compare tab to see pricing and details.\n\nBest regards,\nShalom International`,
         status: 'ready',
         to: null,
+        project_id: p.id,
+      });
+    }
+
+    // 4. Best & Final / revision requests — one email per factory that is above
+    //    the current lowest FOB on any item, but only where there's competition
+    //    (2+ factories quoted that item). The 10%-below target stays internal.
+    const { rows: itemQuotes } = await pool.query(
+      `SELECT item_index, factory_name, price, style_num, description
+       FROM quotes
+       WHERE project_id=$1 AND item_index IS NOT NULL AND price IS NOT NULL`,
+      [projectId]
+    );
+    const { rows: outboundItems } = await pool.query(
+      'SELECT item_index, style_num, description FROM project_items WHERE project_id=$1',
+      [projectId]
+    );
+    const itemMeta = {};
+    outboundItems.forEach(it => { itemMeta[it.item_index] = it; });
+
+    const byItem = {};
+    itemQuotes.forEach(q => { (byItem[q.item_index] = byItem[q.item_index] || []).push(q); });
+
+    // For each competitive item, flag every factory priced strictly above the lowest.
+    const highByFactory = {};
+    Object.entries(byItem).forEach(([idx, qs]) => {
+      const distinctFactories = new Set(qs.map(q => q.factory_name));
+      if (distinctFactories.size < 2) return; // no competition on this item
+      const prices = qs.map(q => parseFloat(q.price)).filter(n => !isNaN(n));
+      if (!prices.length) return;
+      const lowest = Math.min(...prices);
+      qs.forEach(q => {
+        const theirs = parseFloat(q.price);
+        if (isNaN(theirs) || theirs <= lowest) return; // the lowest (and ties) are already competitive
+        const meta = itemMeta[idx] || {};
+        const label = q.style_num || meta.style_num || q.description || meta.description || `Item ${idx}`;
+        (highByFactory[q.factory_name] = highByFactory[q.factory_name] || []).push({
+          label,
+          best_price: lowest,
+          their_price: theirs,
+          pct_higher: ((theirs - lowest) / lowest) * 100,
+        });
+      });
+    });
+
+    for (const [factoryName, items] of Object.entries(highByFactory)) {
+      const link = await ensureRevisionLink(projectId, factoryName, frontendUrl);
+      const lines = items
+        .map(it => `• ${it.label}\n    Our current best FOB: $${it.best_price.toFixed(2)}   |   Your quote: $${it.their_price.toFixed(2)}   (${it.pct_higher.toFixed(1)}% higher)`)
+        .join('\n');
+      drafts.push({
+        type: 'revision_request',
+        factory_name: factoryName,
+        subject: `Best & Final Pricing Request: ${p.name}`,
+        body: `Hi ${factoryName},\n\nThank you for submitting your quotation.\n\nAfter reviewing all supplier quotations, we'd like to give you one final opportunity to revise your pricing.\n\nThe following item(s) came in above our current best price:\n\n${lines}\n\nIf you would like to remain competitive for this project, please review your pricing and submit your best and final quotation through the Supplier Portal.\n\nSupplier Portal: ${link}\n\nPlease submit any revised pricing by [Due Date].\n\nThank you, and we look forward to your updated quotation.\n\nBest Regards,\nJack Shalom\nVice President\nShalom International Corp.`,
+        status: 'competitive',
+        to: emailMap[factoryName] || null,
         project_id: p.id,
       });
     }

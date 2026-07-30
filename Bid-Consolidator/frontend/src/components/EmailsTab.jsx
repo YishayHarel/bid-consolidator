@@ -9,6 +9,7 @@ export default function EmailsTab() {
   const [copied, setCopied] = useState({});
   const [sending, setSending] = useState({});
   const [sentStatus, setSentStatus] = useState({});
+  const [editedBodies, setEditedBodies] = useState({});
 
   useEffect(() => {
     api.get('/projects').then(r => {
@@ -20,10 +21,21 @@ export default function EmailsTab() {
   useEffect(() => {
     if (!selectedId) return;
     setLoading(true);
+    setEditedBodies({});
     api.get(`/emails/project/${selectedId}`).then(r => {
       setDrafts(r.data);
     }).catch(() => setDrafts([])).finally(() => setLoading(false));
   }, [selectedId]);
+
+  // Replace the [Due Date] placeholder in a draft's body with a chosen date.
+  function applyDueDate(draftId, fallbackBody, dateStr) {
+    if (!dateStr) return;
+    const formatted = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    setEditedBodies(b => {
+      const current = b[draftId] ?? fallbackBody;
+      return { ...b, [draftId]: current.replace('[Due Date]', formatted) };
+    });
+  }
 
   function copyToClipboard(text, draftId) {
     navigator.clipboard.writeText(text);
@@ -43,7 +55,7 @@ export default function EmailsTab() {
       await api.post('/emails/send', {
         to: draft.to,
         subject: draft.subject,
-        body: draft.body,
+        body: editedBodies[draftId] ?? draft.body,
         project_id: draft.project_id,
         type: draft.type,
       });
@@ -59,12 +71,14 @@ export default function EmailsTab() {
     vendor_invite: '📬 Vendor Invite',
     follow_up_reminder: '🔔 Follow-up Reminder',
     comparison_ready: '✅ Comparison Ready',
+    revision_request: '💰 Best & Final Request',
   };
 
   const typeColors = {
     vendor_invite: '#dbeafe',
     follow_up_reminder: '#fef08a',
     comparison_ready: '#d1fae5',
+    revision_request: '#ffedd5',
   };
 
   return (
@@ -91,6 +105,8 @@ export default function EmailsTab() {
         <div style={{ display: 'grid', gap: 16 }}>
           {drafts.map((draft, idx) => {
             const draftId = `${draft.type}-${draft.factory_name || 'team'}-${idx}`;
+            const effBody = editedBodies[draftId] ?? draft.body;
+            const isRevision = draft.type === 'revision_request';
             return (
               <div key={draftId} style={{ ...s.card, background: typeColors[draft.type] }}>
                 <div style={s.cardHeader}>
@@ -102,7 +118,7 @@ export default function EmailsTab() {
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button
                       style={{ ...s.copyBtn, ...(copied[draftId] ? s.copiedBtn : {}) }}
-                      onClick={() => copyToClipboard(`Subject: ${draft.subject}\n\n${draft.body}`, draftId)}
+                      onClick={() => copyToClipboard(`Subject: ${draft.subject}\n\n${effBody}`, draftId)}
                     >
                       {copied[draftId] ? '✓ Copied' : 'Copy'}
                     </button>
@@ -116,7 +132,23 @@ export default function EmailsTab() {
                   </div>
                 </div>
                 <div style={s.subject}>Subject: {draft.subject}</div>
-                <div style={s.body}>{draft.body}</div>
+                {isRevision ? (
+                  <>
+                    <div style={s.dueRow}>
+                      <label style={s.dueLabel}>Set due date:</label>
+                      <input type="date" style={s.dueInput}
+                        onChange={e => applyDueDate(draftId, draft.body, e.target.value)} />
+                      <span style={s.dueHint}>fills the “[Due Date]” placeholder — you can also edit the text directly</span>
+                    </div>
+                    <textarea
+                      style={s.bodyEdit}
+                      value={effBody}
+                      onChange={e => setEditedBodies(b => ({ ...b, [draftId]: e.target.value }))}
+                    />
+                  </>
+                ) : (
+                  <div style={s.body}>{draft.body}</div>
+                )}
                 {draft.attachment && (
                   <div style={s.attachment}>📎 {draft.attachment}</div>
                 )}
@@ -139,6 +171,11 @@ const s = {
   status: { fontSize: 11, color: '#64748b', fontStyle: 'italic' },
   subject: { fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid rgba(0,0,0,0.1)' },
   body: { fontSize: 13, color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: 'monospace' },
+  bodyEdit: { width: '100%', boxSizing: 'border-box', minHeight: 260, fontSize: 13, color: '#334155', lineHeight: 1.6, fontFamily: 'monospace', padding: 12, border: '1px solid rgba(0,0,0,0.15)', borderRadius: 8, background: 'rgba(255,255,255,0.85)', resize: 'vertical' },
+  dueRow: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' },
+  dueLabel: { fontSize: 12, fontWeight: 600, color: '#475569' },
+  dueInput: { padding: '5px 8px', border: '1px solid rgba(0,0,0,0.15)', borderRadius: 6, fontSize: 12 },
+  dueHint: { fontSize: 11, color: '#78716c', fontStyle: 'italic' },
   attachment: { marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(0,0,0,0.12)', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600, color: '#334155' },
   copyBtn: { padding: '5px 14px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' },
   copiedBtn: { background: '#166534' },
