@@ -20,6 +20,39 @@ if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
   });
 }
 
+// Built-in default email formats. A user's saved templates (user_email_templates)
+// override these per type. Bodies use [Placeholder] tokens filled in per email:
+//   [Contact Name] [Project Name] [Portal Link] [Sender Name] [Items] [Quote Count] [Due Date]
+const DEFAULT_TEMPLATES = {
+  vendor_invite: {
+    subject: 'Quote Request: [Project Name]',
+    body: `Hi [Contact Name],\n\nI hope you're doing well!\n\nWe're very excited about launching our new [Project Name] program and believe it has tremendous potential. As you know, the market has become extremely competitive, with pricing coming down significantly over the past year — so it's very important that we receive the most competitive FOB pricing possible. With the right partner, we believe this program can grow into a significant, long-term business.\n\nPlease see the attached Excel file with the items we've selected for our initial launch. If the file includes more than one tab, please quote all of them.\n\nPlease complete the attached file with your best FOB pricing for each item. We are looking for:\n\n• The most competitive pricing\n• Excellent quality\n\nYou can submit your completed pricing through our Supplier Portal:\n[Portal Link]\n\nWe're excited about the opportunity to build both a successful launch and a long-term business together, and we look forward to reviewing your pricing.\n\nThank you!\n[Sender Name]`,
+  },
+  follow_up_reminder: {
+    subject: 'Reminder: Quote Request for [Project Name]',
+    body: `Hi [Contact Name],\n\nJust following up — we haven't received your quote for [Project Name] yet, and the deadline is approaching.\n\nPlease submit your best FOB pricing as soon as possible through our Supplier Portal:\n[Portal Link]\n\nThank you!\n[Sender Name]`,
+  },
+  comparison_ready: {
+    subject: 'Quote Comparison Ready: [Project Name]',
+    body: `Hi Team,\n\nWe've received [Quote Count] quote(s) for [Project Name]. The comparison is now available in the system.\n\nReview the Compare tab to see pricing and details.\n\nBest regards,\n[Sender Name]`,
+  },
+  revision_request: {
+    subject: 'Best & Final Pricing Request: [Project Name]',
+    body: `Hi [Contact Name],\n\nThank you for submitting your quotation.\n\nAfter reviewing all supplier quotations, we'd like to give you one final opportunity to revise your pricing.\n\nThe following item(s) came in above our current best price:\n\n[Items]\n\nIf you would like to remain competitive for this project, please review your pricing and submit your best and final quotation through the Supplier Portal.\n\nSupplier Portal: [Portal Link]\n\nPlease submit any revised pricing by [Due Date].\n\nThank you, and we look forward to your updated quotation.\n\nBest Regards,\n[Sender Name]`,
+  },
+};
+const TEMPLATE_TYPES = Object.keys(DEFAULT_TEMPLATES);
+
+// Replace [Token] placeholders present in `vars`. Tokens not in `vars` (e.g.
+// [Due Date]) are left as-is for the frontend to handle.
+function fillTemplate(text, vars) {
+  let out = text || '';
+  for (const [k, v] of Object.entries(vars)) {
+    out = out.split(`[${k}]`).join(v == null ? '' : String(v));
+  }
+  return out;
+}
+
 // Get (or reuse) an unused, unexpired portal token for a factory so it can
 // submit REVISED pricing. Their original invite token is single-use and already
 // spent once they've quoted, so we issue a fresh one for the best-and-final round.
@@ -95,24 +128,35 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
     // Sign as the logged-in user (falls back to the org name).
     const senderName = req.user.name || 'Shalom International';
 
+    // This user's personalized email templates (override the defaults per type).
+    const { rows: tRows } = await pool.query(
+      'SELECT type, subject, body FROM user_email_templates WHERE user_id=$1',
+      [req.user.id]
+    );
+    const userT = {};
+    tRows.forEach(r => { userT[r.type] = r; });
+    const tpl = (type) => ({
+      subject: userT[type]?.subject || DEFAULT_TEMPLATES[type].subject,
+      body: userT[type]?.body || DEFAULT_TEMPLATES[type].body,
+    });
+
     const p = project[0];
     const drafts = [];
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
     const templateAttachment = p.template_path ? path.basename(p.template_path).replace(/^\d+-/, '') : null;
 
-    // The invite body is a template with two personalized slots: the greeting
-    // name and the factory's portal link. The frontend renders each factory's
-    // invite from the (editable) master by filling these slots.
-    const inviteTemplate = (contact, link) =>
-      `Hi ${contact},\n\nI hope you're doing well!\n\nWe're very excited about launching our new ${p.name} program and believe it has tremendous potential. As you know, the market has become extremely competitive, with pricing coming down significantly over the past year — so it's very important that we receive the most competitive FOB pricing possible. With the right partner, we believe this program can grow into a significant, long-term business.\n\nPlease see the attached Excel file with the items we've selected for our initial launch. If the file includes more than one tab, please quote all of them.\n\nPlease complete the attached file with your best FOB pricing for each item. We are looking for:\n\n• The most competitive pricing\n• Excellent quality\n\nYou can submit your completed pricing through our Supplier Portal:\n${link}\n\nWe're excited about the opportunity to build both a successful launch and a long-term business together, and we look forward to reviewing your pricing.\n\nThank you!\n${senderName}`;
+    const inviteT = tpl('vendor_invite');
+    const inviteSubject = fillTemplate(inviteT.subject, { 'Project Name': p.name });
 
-    // 0. Master invite template (edits cascade to every factory invite below).
+    // 0. Master invite template (this user's saved format). Its raw body keeps
+    //    all placeholders; the frontend renders each factory invite from it and
+    //    cascades edits down to every invite below (unless one is overridden).
     drafts.push({
       type: 'invite_master',
       factory_name: null,
-      subject: `Quote Request: ${p.name}`,
-      body: inviteTemplate('[Contact Name]', '[Portal Link]'),
+      subject: inviteSubject,
+      body: inviteT.body,
       status: 'template',
       to: null,
       project_id: p.id,
@@ -127,10 +171,14 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
       drafts.push({
         type: 'vendor_invite',
         factory_name: f.factory_name,
-        subject: `Quote Request: ${p.name}`,
-        body: inviteTemplate(contact, link),
+        subject: inviteSubject,
+        body: fillTemplate(inviteT.body, {
+          'Contact Name': contact, 'Project Name': p.name, 'Portal Link': link, 'Sender Name': senderName,
+        }),
         contact,
         link,
+        project_name: p.name,
+        sender_name: senderName,
         status: f.status,
         to: emailMap[f.factory_name] || null,
         project_id: p.id,
@@ -139,6 +187,7 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
     });
 
     // 2. Follow-up emails for non-responders (2+ days)
+    const followT = tpl('follow_up_reminder');
     factories
       .filter(f => f.status === 'no_response')
       .forEach(f => {
@@ -147,8 +196,10 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
         drafts.push({
           type: 'follow_up_reminder',
           factory_name: f.factory_name,
-          subject: `Reminder: Quote Request for ${p.name}`,
-          body: `Hi ${greet(f.factory_name)},\n\nJust following up — we haven't received your quote for ${p.name} yet, and the deadline is approaching.\n\nPlease submit your best FOB pricing as soon as possible through our Supplier Portal:\n${link}\n\nThank you!\n${senderName}`,
+          subject: fillTemplate(followT.subject, { 'Project Name': p.name }),
+          body: fillTemplate(followT.body, {
+            'Contact Name': greet(f.factory_name), 'Project Name': p.name, 'Portal Link': link, 'Sender Name': senderName,
+          }),
           status: 'no_response',
           to: emailMap[f.factory_name] || null,
           project_id: p.id,
@@ -157,11 +208,14 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
 
     // 3. Comparison available email (once submissions exist)
     if (quotes.length > 0) {
+      const compT = tpl('comparison_ready');
       drafts.push({
         type: 'comparison_ready',
         factory_name: null,
-        subject: `Quote Comparison Ready: ${p.name}`,
-        body: `Hi Team,\n\nWe've received ${quotes.length} quote(s) for ${p.name}. The comparison is now available in the system.\n\nReview the Compare tab to see pricing and details.\n\nBest regards,\nShalom International`,
+        subject: fillTemplate(compT.subject, { 'Project Name': p.name }),
+        body: fillTemplate(compT.body, {
+          'Quote Count': quotes.length, 'Project Name': p.name, 'Sender Name': senderName,
+        }),
         status: 'ready',
         to: null,
         project_id: p.id,
@@ -209,6 +263,7 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
       });
     });
 
+    const revisionT = tpl('revision_request');
     for (const [factoryName, items] of Object.entries(highByFactory)) {
       const link = await ensureRevisionLink(projectId, factoryName, frontendUrl);
       const lines = items
@@ -217,8 +272,11 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
       drafts.push({
         type: 'revision_request',
         factory_name: factoryName,
-        subject: `Best & Final Pricing Request: ${p.name}`,
-        body: `Hi ${greet(factoryName)},\n\nThank you for submitting your quotation.\n\nAfter reviewing all supplier quotations, we'd like to give you one final opportunity to revise your pricing.\n\nThe following item(s) came in above our current best price:\n\n${lines}\n\nIf you would like to remain competitive for this project, please review your pricing and submit your best and final quotation through the Supplier Portal.\n\nSupplier Portal: ${link}\n\nPlease submit any revised pricing by [Due Date].\n\nThank you, and we look forward to your updated quotation.\n\nBest Regards,\n${senderName}`,
+        subject: fillTemplate(revisionT.subject, { 'Project Name': p.name }),
+        // [Due Date] is intentionally left as a placeholder for the date picker.
+        body: fillTemplate(revisionT.body, {
+          'Contact Name': greet(factoryName), 'Project Name': p.name, 'Items': lines, 'Portal Link': link, 'Sender Name': senderName,
+        }),
         status: 'competitive',
         to: emailMap[factoryName] || null,
         project_id: p.id,
@@ -263,6 +321,60 @@ router.post('/send', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Email send error:', err);
     res.status(500).json({ error: 'Failed to send email' });
+  }
+});
+
+// List this user's effective templates (their saved overrides, or the defaults).
+router.get('/templates', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT type, subject, body FROM user_email_templates WHERE user_id=$1',
+      [req.user.id]
+    );
+    const saved = {};
+    rows.forEach(r => { saved[r.type] = r; });
+    const out = {};
+    for (const type of TEMPLATE_TYPES) {
+      out[type] = {
+        subject: saved[type]?.subject || DEFAULT_TEMPLATES[type].subject,
+        body: saved[type]?.body || DEFAULT_TEMPLATES[type].body,
+        is_custom: !!saved[type],
+      };
+    }
+    res.json(out);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Save (personalize) one of this user's email templates.
+router.post('/templates', requireAuth, async (req, res) => {
+  const { type, subject, body } = req.body;
+  if (!TEMPLATE_TYPES.includes(type)) return res.status(400).json({ error: 'Unknown template type' });
+  if (!body || !body.trim()) return res.status(400).json({ error: 'Body required' });
+  try {
+    await pool.query(
+      `INSERT INTO user_email_templates (user_id, type, subject, body, updated_at)
+       VALUES ($1,$2,$3,$4,NOW())
+       ON CONFLICT (user_id, type) DO UPDATE SET subject=EXCLUDED.subject, body=EXCLUDED.body, updated_at=NOW()`,
+      [req.user.id, type, subject || null, body]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Reset one of this user's templates back to the built-in default.
+router.delete('/templates/:type', requireAuth, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM user_email_templates WHERE user_id=$1 AND type=$2', [req.user.id, req.params.type]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

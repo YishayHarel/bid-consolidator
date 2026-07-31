@@ -34,7 +34,37 @@ export default function EmailsTab() {
   function renderInvite(tpl, draft) {
     return (tpl || '')
       .split('[Contact Name]').join(draft.contact || draft.factory_name || '')
-      .split('[Portal Link]').join(draft.link || '');
+      .split('[Portal Link]').join(draft.link || '')
+      .split('[Project Name]').join(draft.project_name || '')
+      .split('[Sender Name]').join(draft.sender_name || '');
+  }
+
+  // Persist the edited master as this user's saved invite template.
+  const [savingMaster, setSavingMaster] = useState(false);
+  const [masterSaved, setMasterSaved] = useState(false);
+  async function saveMaster() {
+    setSavingMaster(true);
+    try {
+      await api.post('/emails/templates', { type: 'vendor_invite', body: master });
+      setMasterSaved(true);
+      setTimeout(() => setMasterSaved(false), 2500);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to save template');
+    }
+    setSavingMaster(false);
+  }
+  async function resetMaster() {
+    if (!confirm('Reset your invite template back to the built-in default?')) return;
+    try {
+      await api.delete('/emails/templates/vendor_invite');
+      const { data } = await api.get(`/emails/project/${selectedId}`);
+      setDrafts(data);
+      const m = data.find(d => d.type === 'invite_master');
+      setMaster(m ? m.body : '');
+      setEditedBodies({});
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to reset');
+    }
   }
 
   // The body actually shown/sent for a draft: an individually-edited body wins;
@@ -138,7 +168,18 @@ export default function EmailsTab() {
                     {draft.factory_name && <div style={s.factory}>{draft.factory_name}{isOverridden && <span style={s.editedTag}> · edited (won't follow the master)</span>}</div>}
                     {!isMaster && <div style={s.status}>Status: {draft.status}</div>}
                   </div>
-                  {!isMaster && (
+                  {isMaster ? (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button style={s.copyBtn} onClick={resetMaster}>Reset to default</button>
+                      <button
+                        style={{ ...s.sendBtn, ...(masterSaved ? s.sentBtn : {}) }}
+                        onClick={saveMaster}
+                        disabled={savingMaster}
+                      >
+                        {masterSaved ? '✓ Saved for my account' : savingMaster ? '...' : 'Save as my template'}
+                      </button>
+                    </div>
+                  ) : (
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button
                         style={{ ...s.copyBtn, ...(copied[draftId] ? s.copiedBtn : {}) }}
@@ -160,7 +201,7 @@ export default function EmailsTab() {
                 {isMaster ? (
                   <>
                     <div style={s.masterNote}>
-                      Edits here apply to <strong>every factory invite below</strong>. <code>[Contact Name]</code> and <code>[Portal Link]</code> are filled in automatically per factory. If you edit an individual invite, it stops following this master.
+                      This is <strong>your account's</strong> invite format. Edits apply to <strong>every factory invite below</strong>; <code>[Contact Name]</code>, <code>[Project Name]</code>, <code>[Portal Link]</code> and <code>[Sender Name]</code> are filled in automatically per email. Click <strong>Save as my template</strong> to keep this format for your account across all projects. Editing an individual invite below stops it from following this master.
                     </div>
                     <textarea
                       style={s.bodyEdit}

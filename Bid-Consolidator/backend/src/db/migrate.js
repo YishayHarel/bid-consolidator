@@ -119,6 +119,19 @@ async function migrate() {
     await client.query(`DROP INDEX IF EXISTS factories_name_lower_idx;`);
     await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS factories_owner_name_idx ON factories (created_by, LOWER(name));`);
 
+    // Per-user email templates (personalized formats). One row per (user, type);
+    // absence means "use the built-in default". Bodies use [Placeholder] tokens.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_email_templates (
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        type VARCHAR(50) NOT NULL,
+        subject TEXT,
+        body TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (user_id, type)
+      );
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS project_items (
         id SERIAL PRIMARY KEY,
