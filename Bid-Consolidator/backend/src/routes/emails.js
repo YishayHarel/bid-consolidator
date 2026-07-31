@@ -26,7 +26,7 @@ if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
 const DEFAULT_TEMPLATES = {
   vendor_invite: {
     subject: 'Quote Request: [Project Name]',
-    body: `Hi [Contact Name],\n\nI hope you're doing well!\n\nWe're very excited about launching our new [Project Name] program and believe it has tremendous potential. As you know, the market has become extremely competitive, with pricing coming down significantly over the past year — so it's very important that we receive the most competitive FOB pricing possible. With the right partner, we believe this program can grow into a significant, long-term business.\n\nPlease see the attached Excel file with the items we've selected for our initial launch. If the file includes more than one tab, please quote all of them.\n\nPlease complete the attached file with your best FOB pricing for each item. We are looking for:\n\n• The most competitive pricing\n• Excellent quality\n\nYou can submit your completed pricing through our Supplier Portal:\n[Portal Link]\n\nWe're excited about the opportunity to build both a successful launch and a long-term business together, and we look forward to reviewing your pricing.\n\nThank you!\n[Sender Name]`,
+    body: `Hi [Contact Name],\n\nWe'd like to invite you to quote on our [Project Name] program.\n\nPlease see the attached Excel file with the items, and complete it with your best FOB pricing for each. If the file includes more than one tab, please quote all of them.\n\nYou can submit your completed pricing through our Supplier Portal:\n[Portal Link]\n\nThank you, and we look forward to your quotation.\n\nBest regards,\n[Sender Name]`,
   },
   follow_up_reminder: {
     subject: 'Reminder: Quote Request for [Project Name]',
