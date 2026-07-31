@@ -10,6 +10,7 @@ export default function EmailsTab() {
   const [sending, setSending] = useState({});
   const [sentStatus, setSentStatus] = useState({});
   const [editedBodies, setEditedBodies] = useState({});
+  const [master, setMaster] = useState(''); // editable master invite template
 
   useEffect(() => {
     api.get('/projects').then(r => {
@@ -24,8 +25,26 @@ export default function EmailsTab() {
     setEditedBodies({});
     api.get(`/emails/project/${selectedId}`).then(r => {
       setDrafts(r.data);
-    }).catch(() => setDrafts([])).finally(() => setLoading(false));
+      const m = r.data.find(d => d.type === 'invite_master');
+      setMaster(m ? m.body : '');
+    }).catch(() => { setDrafts([]); setMaster(''); }).finally(() => setLoading(false));
   }, [selectedId]);
+
+  // Fill the master template's personalized slots for a specific factory invite.
+  function renderInvite(tpl, draft) {
+    return (tpl || '')
+      .split('[Contact Name]').join(draft.contact || draft.factory_name || '')
+      .split('[Portal Link]').join(draft.link || '');
+  }
+
+  // The body actually shown/sent for a draft: an individually-edited body wins;
+  // otherwise factory invites render live from the (editable) master template.
+  function effectiveBody(draft, draftId) {
+    if (draft.type === 'invite_master') return master;
+    if (editedBodies[draftId] != null) return editedBodies[draftId];
+    if (draft.type === 'vendor_invite') return renderInvite(master, draft);
+    return draft.body;
+  }
 
   // Replace the [Due Date] placeholder in a draft's body with a chosen date.
   function applyDueDate(draftId, fallbackBody, dateStr) {
@@ -55,7 +74,7 @@ export default function EmailsTab() {
       await api.post('/emails/send', {
         to: draft.to,
         subject: draft.subject,
-        body: editedBodies[draftId] ?? draft.body,
+        body: effectiveBody(draft, draftId),
         project_id: draft.project_id,
         type: draft.type,
       });
@@ -68,6 +87,7 @@ export default function EmailsTab() {
   }
 
   const typeLabels = {
+    invite_master: '📝 Master Invite Template',
     vendor_invite: '📬 Vendor Invite',
     follow_up_reminder: '🔔 Follow-up Reminder',
     comparison_ready: '✅ Comparison Ready',
@@ -75,6 +95,7 @@ export default function EmailsTab() {
   };
 
   const typeColors = {
+    invite_master: '#e0e7ff',
     vendor_invite: '#dbeafe',
     follow_up_reminder: '#fef08a',
     comparison_ready: '#d1fae5',
@@ -105,34 +126,49 @@ export default function EmailsTab() {
         <div style={{ display: 'grid', gap: 16 }}>
           {drafts.map((draft, idx) => {
             const draftId = `${draft.type}-${draft.factory_name || 'team'}-${idx}`;
-            const effBody = editedBodies[draftId] ?? draft.body;
+            const effBody = effectiveBody(draft, draftId);
+            const isMaster = draft.type === 'invite_master';
             const isRevision = draft.type === 'revision_request';
+            const isOverridden = draft.type === 'vendor_invite' && editedBodies[draftId] != null;
             return (
-              <div key={draftId} style={{ ...s.card, background: typeColors[draft.type] }}>
+              <div key={draftId} style={{ ...s.card, background: typeColors[draft.type], ...(isMaster ? s.masterCard : {}) }}>
                 <div style={s.cardHeader}>
                   <div>
                     <div style={s.draftType}>{typeLabels[draft.type]}</div>
-                    {draft.factory_name && <div style={s.factory}>{draft.factory_name}</div>}
-                    <div style={s.status}>Status: {draft.status}</div>
+                    {draft.factory_name && <div style={s.factory}>{draft.factory_name}{isOverridden && <span style={s.editedTag}> · edited (won't follow the master)</span>}</div>}
+                    {!isMaster && <div style={s.status}>Status: {draft.status}</div>}
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      style={{ ...s.copyBtn, ...(copied[draftId] ? s.copiedBtn : {}) }}
-                      onClick={() => copyToClipboard(`Subject: ${draft.subject}\n\n${effBody}`, draftId)}
-                    >
-                      {copied[draftId] ? '✓ Copied' : 'Copy'}
-                    </button>
-                    <button
-                      style={{ ...s.sendBtn, ...(sentStatus[draftId] ? s.sentBtn : {}) }}
-                      onClick={() => sendEmail(draft, draftId)}
-                      disabled={sending[draftId]}
-                    >
-                      {sentStatus[draftId] ? '✓ Sent' : sending[draftId] ? '...' : 'Send'}
-                    </button>
-                  </div>
+                  {!isMaster && (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        style={{ ...s.copyBtn, ...(copied[draftId] ? s.copiedBtn : {}) }}
+                        onClick={() => copyToClipboard(`Subject: ${draft.subject}\n\n${effBody}`, draftId)}
+                      >
+                        {copied[draftId] ? '✓ Copied' : 'Copy'}
+                      </button>
+                      <button
+                        style={{ ...s.sendBtn, ...(sentStatus[draftId] ? s.sentBtn : {}) }}
+                        onClick={() => sendEmail(draft, draftId)}
+                        disabled={sending[draftId]}
+                      >
+                        {sentStatus[draftId] ? '✓ Sent' : sending[draftId] ? '...' : 'Send'}
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div style={s.subject}>Subject: {draft.subject}</div>
-                {isRevision ? (
+                {isMaster ? (
+                  <>
+                    <div style={s.masterNote}>
+                      Edits here apply to <strong>every factory invite below</strong>. <code>[Contact Name]</code> and <code>[Portal Link]</code> are filled in automatically per factory. If you edit an individual invite, it stops following this master.
+                    </div>
+                    <textarea
+                      style={s.bodyEdit}
+                      value={master}
+                      onChange={e => setMaster(e.target.value)}
+                    />
+                  </>
+                ) : isRevision ? (
                   <>
                     <div style={s.dueRow}>
                       <label style={s.dueLabel}>Set due date:</label>
@@ -169,6 +205,9 @@ const s = {
   select: { padding: '7px 12px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', minWidth: 220 },
   empty: { color: '#94a3b8', textAlign: 'center', padding: 60 },
   card: { border: '1px solid #e2e8f0', borderRadius: 10, padding: 18 },
+  masterCard: { border: '2px solid #6366f1' },
+  masterNote: { fontSize: 12, color: '#3730a3', background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, padding: '8px 12px', marginBottom: 10, lineHeight: 1.5 },
+  editedTag: { fontSize: 11, color: '#b45309', fontStyle: 'italic' },
   cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
   draftType: { fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 4 },
   factory: { fontSize: 12, color: '#64748b', marginBottom: 4 },

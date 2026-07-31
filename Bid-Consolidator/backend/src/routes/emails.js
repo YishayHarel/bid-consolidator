@@ -99,19 +99,42 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
     const drafts = [];
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-    // 1. Initial vendor invite emails
+    const templateAttachment = p.template_path ? path.basename(p.template_path).replace(/^\d+-/, '') : null;
+
+    // The invite body is a template with two personalized slots: the greeting
+    // name and the factory's portal link. The frontend renders each factory's
+    // invite from the (editable) master by filling these slots.
+    const inviteTemplate = (contact, link) =>
+      `Hi ${contact},\n\nI hope you're doing well!\n\nWe're very excited about launching our new ${p.name} program and believe it has tremendous potential. As you know, the market has become extremely competitive, with pricing coming down significantly over the past year — so it's very important that we receive the most competitive FOB pricing possible. With the right partner, we believe this program can grow into a significant, long-term business.\n\nPlease see the attached Excel file with the items we've selected for our initial launch. If the file includes more than one tab, please quote all of them.\n\nPlease complete the attached file with your best FOB pricing for each item. We are looking for:\n\n• The most competitive pricing\n• Excellent quality\n\nYou can submit your completed pricing through our Supplier Portal:\n${link}\n\nWe're excited about the opportunity to build both a successful launch and a long-term business together, and we look forward to reviewing your pricing.\n\nThank you!\n${senderName}`;
+
+    // 0. Master invite template (edits cascade to every factory invite below).
+    drafts.push({
+      type: 'invite_master',
+      factory_name: null,
+      subject: `Quote Request: ${p.name}`,
+      body: inviteTemplate('[Contact Name]', '[Portal Link]'),
+      status: 'template',
+      to: null,
+      project_id: p.id,
+      attachment: templateAttachment,
+    });
+
+    // 1. Initial vendor invite emails (one per factory)
     factories.forEach(f => {
       const token = tokenMap[f.factory_name];
       const link = token ? `${frontendUrl}/vendor?token=${token}` : `${frontendUrl}/vendor`;
+      const contact = greet(f.factory_name);
       drafts.push({
         type: 'vendor_invite',
         factory_name: f.factory_name,
         subject: `Quote Request: ${p.name}`,
-        body: `Hi ${greet(f.factory_name)},\n\nI hope you're doing well!\n\nWe're very excited about launching our new ${p.name} program and believe it has tremendous potential. As you know, the market has become extremely competitive, with pricing coming down significantly over the past year — so it's very important that we receive the most competitive FOB pricing possible. With the right partner, we believe this program can grow into a significant, long-term business.\n\nPlease see the attached Excel file with the items we've selected for our initial launch. If the file includes more than one tab, please quote all of them.\n\nPlease complete the attached file with your best FOB pricing for each item. We are looking for:\n\n• The most competitive pricing\n• Excellent quality\n\nYou can submit your completed pricing through our Supplier Portal:\n${link}\n\nWe're excited about the opportunity to build both a successful launch and a long-term business together, and we look forward to reviewing your pricing.\n\nThank you!\n${senderName}`,
+        body: inviteTemplate(contact, link),
+        contact,
+        link,
         status: f.status,
         to: emailMap[f.factory_name] || null,
         project_id: p.id,
-        attachment: p.template_path ? path.basename(p.template_path).replace(/^\d+-/, '') : null,
+        attachment: templateAttachment,
       });
     });
 
