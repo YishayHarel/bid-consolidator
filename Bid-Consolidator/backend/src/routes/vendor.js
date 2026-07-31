@@ -7,7 +7,7 @@ const { requireAuth } = require('../middleware/auth');
 const { parseQuoteExcel } = require('../utils/parseExcel');
 const { extractImagesByRow } = require('../utils/extractImages');
 const { resolveItemIndex } = require('../utils/matchItems');
-const { saveObject, contentTypeFor } = require('../utils/storage');
+const { saveObject, contentTypeFor, resolveObject } = require('../utils/storage');
 
 const router = express.Router();
 
@@ -70,7 +70,7 @@ router.delete('/tokens/:id', requireAuth, async (req, res) => {
 router.get('/validate/:token', async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT vt.*, p.name AS project_name
+      `SELECT vt.*, p.name AS project_name, p.template_path
        FROM vendor_tokens vt
        LEFT JOIN projects p ON p.id = vt.project_id
        WHERE vt.token=$1`,
@@ -80,8 +80,39 @@ router.get('/validate/:token', async (req, res) => {
     if (!t) return res.status(404).json({ status: 'invalid' });
     if (t.used_at) return res.json({ status: 'used', factory_name: t.factory_name });
     if (new Date(t.expires_at) < new Date()) return res.json({ status: 'expired' });
-    res.json({ status: 'valid', factory_name: t.factory_name, project_name: t.project_name, project_id: t.project_id });
+    res.json({
+      status: 'valid',
+      factory_name: t.factory_name,
+      project_name: t.project_name,
+      project_id: t.project_id,
+      has_template: !!t.template_path,
+      template_name: t.template_path ? path.basename(t.template_path).replace(/^\d+-/, '') : null,
+    });
   } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Public: download the project's outbound template for a valid token. This is
+// how factories get the quote file now (instead of an email attachment).
+router.get('/template/:token', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT p.template_path
+       FROM vendor_tokens vt
+       JOIN projects p ON p.id = vt.project_id
+       WHERE vt.token=$1`,
+      [req.params.token]
+    );
+    const templatePath = rows[0]?.template_path;
+    if (!templatePath) return res.status(404).json({ error: 'No template available' });
+    const downloadName = path.basename(templatePath).replace(/^\d+-/, '');
+    const r = await resolveObject(templatePath);
+    if (!r) return res.status(404).json({ error: 'File not found' });
+    if (r.redirectUrl) return res.redirect(r.redirectUrl);
+    return res.download(r.filePath, downloadName);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Server error' });
   }
 });

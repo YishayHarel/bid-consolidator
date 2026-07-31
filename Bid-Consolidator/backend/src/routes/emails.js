@@ -26,7 +26,7 @@ if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
 const DEFAULT_TEMPLATES = {
   vendor_invite: {
     subject: 'Quote Request: [Project Name]',
-    body: `Hi [Contact Name],\n\nWe'd like to invite you to quote on our [Project Name] program.\n\nPlease see the attached Excel file with the items, and complete it with your best FOB pricing for each. If the file includes more than one tab, please quote all of them.\n\nYou can submit your completed pricing through our Supplier Portal:\n[Portal Link]\n\nThank you, and we look forward to your quotation.\n\nBest regards,\n[Sender Name]`,
+    body: `Hi [Contact Name],\n\nWe'd like to invite you to quote on our [Project Name] program.\n\nPlease open the Supplier Portal below to download the quote template, complete it with your best FOB pricing for each item, and submit it back through the same portal. If the file includes more than one tab, please quote all of them.\n\nSupplier Portal:\n[Portal Link]\n\nThank you, and we look forward to your quotation.\n\nBest regards,\n[Sender Name]`,
   },
   follow_up_reminder: {
     subject: 'Reminder: Quote Request for [Project Name]',
@@ -144,8 +144,6 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
     const drafts = [];
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-    const templateAttachment = p.template_path ? path.basename(p.template_path).replace(/^\d+-/, '') : null;
-
     const inviteT = tpl('vendor_invite');
     const inviteSubject = fillTemplate(inviteT.subject, { 'Project Name': p.name });
 
@@ -160,7 +158,6 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
       status: 'template',
       to: null,
       project_id: p.id,
-      attachment: templateAttachment,
     });
 
     // 1. Initial vendor invite emails (one per factory)
@@ -182,7 +179,6 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
         status: f.status,
         to: emailMap[f.factory_name] || null,
         project_id: p.id,
-        attachment: templateAttachment,
       });
     });
 
@@ -300,22 +296,13 @@ router.post('/send', requireAuth, async (req, res) => {
     return res.status(500).json({ error: 'Email service not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env' });
   }
   try {
-    // Attach the project's outbound file to the initial invite email only.
-    let attachments;
-    if (type === 'vendor_invite' && project_id) {
-      const { rows } = await pool.query('SELECT template_path FROM projects WHERE id=$1', [project_id]);
-      const templatePath = rows[0]?.template_path;
-      if (templatePath && fs.existsSync(templatePath)) {
-        attachments = [{ filename: path.basename(templatePath), path: templatePath }];
-      }
-    }
-
+    // The outbound file is no longer attached — factories download it from the
+    // Supplier Portal link in the email body instead.
     await emailTransporter.sendMail({
       from: process.env.SMTP_FROM || process.env.SMTP_USER,
       to,
       subject,
       text: body,
-      ...(attachments ? { attachments } : {}),
     });
     res.json({ success: true });
   } catch (err) {

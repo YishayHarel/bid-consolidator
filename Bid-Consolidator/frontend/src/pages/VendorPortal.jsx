@@ -12,6 +12,7 @@ export default function VendorPortal() {
   const [tokenFactory, setTokenFactory] = useState('');
   const [tokenProjectId, setTokenProjectId] = useState(null);
   const [projectInfo, setProjectInfo] = useState(null);
+  const [templateInfo, setTemplateInfo] = useState(null); // { has, name }
 
   // Open mode
   const [factoryName, setFactoryName] = useState('');
@@ -32,6 +33,7 @@ export default function VendorPortal() {
             setTokenStatus('valid');
             setTokenFactory(data.factory_name);
             setTokenProjectId(data.project_id);
+            setTemplateInfo({ has: data.has_template, name: data.template_name });
             if (data.project_id) {
               axios.get(`${API_BASE}/projects/${data.project_id}`).then(r => setProjectInfo(r.data)).catch(() => {});
             }
@@ -147,6 +149,16 @@ export default function VendorPortal() {
           </div>
         )}
 
+        {token && templateInfo?.has && (
+          <div style={s.downloadBlock}>
+            <div style={s.downloadLabel}>Step 1 — Download the quote template, fill in your pricing</div>
+            <a href={`${API_BASE}/vendor/template/${token}`} style={s.downloadBtn} download>
+              ⬇ Download quote template{templateInfo.name ? ` — ${templateInfo.name}` : ''}
+            </a>
+            <div style={s.downloadHint}>Step 2 — Complete it, then upload it below.</div>
+          </div>
+        )}
+
         {!token && (
           <>
             <div style={s.fieldWrap}>
@@ -238,6 +250,10 @@ const s = {
   fieldWrap: { marginBottom: 16 },
   label: { display: 'block', fontSize: 13, fontWeight: 500, color: '#475569', marginBottom: 6 },
   input: { width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 14, outline: 'none', boxSizing: 'border-box' },
+  downloadBlock: { background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 10, padding: '16px', marginBottom: 18 },
+  downloadLabel: { fontSize: 13, fontWeight: 600, color: '#0369a1', marginBottom: 10 },
+  downloadBtn: { display: 'inline-block', background: '#0284c7', color: '#fff', textDecoration: 'none', padding: '10px 16px', borderRadius: 8, fontSize: 14, fontWeight: 600 },
+  downloadHint: { fontSize: 12, color: '#64748b', marginTop: 10 },
   dropzone: { border: '2px dashed #cbd5e1', borderRadius: 10, padding: '36px 20px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.15s', marginBottom: 12 },
   dropzoneOver: { borderColor: '#3b82f6', background: '#eff6ff' },
   dropzoneUploading: { opacity: 0.6, cursor: 'default' },
