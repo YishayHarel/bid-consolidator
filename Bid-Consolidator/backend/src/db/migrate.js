@@ -99,6 +99,24 @@ async function migrate() {
       ALTER TABLE project_factories ADD COLUMN IF NOT EXISTS factory_id INTEGER REFERENCES factories(id) ON DELETE SET NULL;
     `);
 
+    // Factory directory is now per-user (each login keeps its own factories) and
+    // supports multiple email addresses per factory.
+    await client.query(`ALTER TABLE factories ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id);`);
+    await client.query(`ALTER TABLE factories ADD COLUMN IF NOT EXISTS emails TEXT[];`);
+    // Backfill the new emails[] array from the legacy single email column.
+    await client.query(`
+      UPDATE factories
+         SET emails = CASE WHEN email IS NOT NULL AND btrim(email) <> ''
+                           THEN ARRAY[btrim(email)] ELSE ARRAY[]::text[] END
+       WHERE emails IS NULL;
+    `);
+    // Assign any pre-existing (ownerless) factories to the first/admin user so
+    // they don't vanish from the directory once we scope by owner.
+    await client.query(`UPDATE factories SET created_by = (SELECT MIN(id) FROM users) WHERE created_by IS NULL;`);
+    // Uniqueness is now per-owner, not global, so two users can each have "ABC".
+    await client.query(`DROP INDEX IF EXISTS factories_name_lower_idx;`);
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS factories_owner_name_idx ON factories (created_by, LOWER(name));`);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS project_items (
         id SERIAL PRIMARY KEY,

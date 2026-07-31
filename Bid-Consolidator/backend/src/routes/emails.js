@@ -70,9 +70,10 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
       [projectId]
     );
 
-    // Get tokens + real email for each factory
+    // Get tokens + all email addresses for each factory. A factory can have
+    // several emails; we join them so a single message goes to all of them.
     const { rows: tokens } = await pool.query(
-      `SELECT pf.factory_name, vt.token, f.email
+      `SELECT pf.factory_name, vt.token, array_to_string(f.emails, ', ') AS email
        FROM project_factories pf
        LEFT JOIN vendor_tokens vt ON vt.project_factory_id = pf.id
        LEFT JOIN factories f ON f.id = pf.factory_id
@@ -85,7 +86,7 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
     const emailMap = {};
     tokens.forEach(t => {
       tokenMap[t.factory_name] = t.token;
-      emailMap[t.factory_name] = t.email;
+      emailMap[t.factory_name] = t.email || null;
     });
 
     const p = project[0];

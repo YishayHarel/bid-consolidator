@@ -176,7 +176,7 @@ router.get('/:id/factories', requireAuth, ownProject, async (req, res) => {
     const { rows } = await pool.query(
       `SELECT pf.*,
               COALESCE(f.name, pf.factory_name) AS display_name,
-              f.email,
+              array_to_string(f.emails, ', ') AS email,
               COUNT(DISTINCT q.item_index)::int AS items_received,
               CASE WHEN pf.submitted_at IS NOT NULL THEN 'submitted'
                    WHEN pf.submitted_at IS NULL AND NOW() - pf.invited_at > interval '2 days' THEN 'no_response'
@@ -185,7 +185,7 @@ router.get('/:id/factories', requireAuth, ownProject, async (req, res) => {
        LEFT JOIN factories f ON f.id = pf.factory_id
        LEFT JOIN quotes q ON q.project_id = pf.project_id AND q.factory_name = pf.factory_name AND q.item_index IS NOT NULL
        WHERE pf.project_id=$1
-       GROUP BY pf.id, f.name, f.email
+       GROUP BY pf.id, f.name, f.emails
        ORDER BY pf.factory_name`,
       [req.params.id]
     );
@@ -212,12 +212,12 @@ router.post('/:id/factories', requireAuth, ownProject, async (req, res) => {
       for (const entry of toInvite) {
         let factory;
         if (entry.factory_id) {
-          const { rows } = await client.query('SELECT * FROM factories WHERE id=$1', [entry.factory_id]);
+          const { rows } = await client.query('SELECT * FROM factories WHERE id=$1 AND created_by=$2', [entry.factory_id, req.user.id]);
           factory = rows[0];
           if (!factory) continue;
         } else {
           if (!entry.name || !entry.name.trim()) continue;
-          factory = await upsertFactory(client, entry.name, entry.email);
+          factory = await upsertFactory(client, req.user.id, entry.name, entry.emails ?? entry.email);
         }
 
         const { rows: pfRows } = await client.query(

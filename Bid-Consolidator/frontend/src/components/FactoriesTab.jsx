@@ -67,11 +67,14 @@ export default function FactoriesTab() {
 
   return (
     <div>
-      <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 20 }}>Factories</h2>
+      <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>Factories</h2>
+      <div style={{ fontSize: 12, color: '#64748b', marginBottom: 18 }}>
+        Your own factory list — only you can see it. A factory can have multiple emails; separate them with commas.
+      </div>
 
       <form onSubmit={addFactory} style={s.addForm}>
         <input style={s.input} placeholder="Factory name" value={newName} onChange={e => setNewName(e.target.value)} />
-        <input style={s.input} placeholder="Email" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
+        <input style={{ ...s.input, minWidth: 320, flex: 1 }} placeholder="Emails (comma-separated)" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
         <button style={s.saveBtn} disabled={adding}>{adding ? 'Adding...' : '+ Add Factory'}</button>
       </form>
 
@@ -85,7 +88,7 @@ export default function FactoriesTab() {
             <thead>
               <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                 <th style={s.th}>Name</th>
-                <th style={s.th}>Email</th>
+                <th style={s.th}>Emails (comma-separated)</th>
                 <th style={s.th}></th>
               </tr>
             </thead>
