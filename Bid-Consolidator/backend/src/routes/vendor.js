@@ -117,14 +117,10 @@ router.get('/template/:token', async (req, res) => {
   }
 });
 
-// Public: list active projects (for open vendor form)
-router.get('/open-projects', async (req, res) => {
-  try {
-    const { rows } = await pool.query("SELECT id, name, buyer, division FROM projects WHERE status='active' ORDER BY name");
-    res.json(rows);
-  } catch {
-    res.status(500).json({ error: 'Server error' });
-  }
+// The tokenless generic portal is disabled: factories may only submit via an
+// invite link. The account owner uploads on their behalf from inside the app.
+router.get('/open-projects', (req, res) => {
+  res.json([]);
 });
 
 // Public: token upload
@@ -197,8 +193,14 @@ router.post('/submit/:token', upload.single('file'), async (req, res) => {
   }
 });
 
-// Public: open upload (factory enters name + picks project)
-router.post('/submit-open', upload.single('file'), async (req, res) => {
+// Disabled: factories can only submit via an invite link (token). The account
+// owner uploads on their behalf from inside the app.
+router.post('/submit-open', (req, res) => {
+  return res.status(403).json({ error: 'An invite link is required to submit a quote. Please use the link we emailed you.' });
+});
+
+// eslint-disable-next-line no-unused-vars
+async function _disabledSubmitOpen(req, res) {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const factory_name = (req.body.factory_name || '').trim();
   const project_id = parseInt(req.body.project_id);
@@ -266,6 +268,6 @@ router.post('/submit-open', upload.single('file'), async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Failed to process submission' });
   }
-});
+}
 
 module.exports = router;

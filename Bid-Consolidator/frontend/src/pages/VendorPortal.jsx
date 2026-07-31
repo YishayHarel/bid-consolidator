@@ -95,6 +95,10 @@ export default function VendorPortal() {
 
   const displayName = token ? tokenFactory : factoryName;
 
+  // The tokenless portal is disabled — factories can only submit via an invite link.
+  if (!token) {
+    return <Screen><StatusBox color="#fff7ed" border="#fdba74" title="Invite Link Required" message="Please use the personal upload link we emailed you to submit your quote. If you don't have one, contact Shalom International and we'll send it over." /></Screen>;
+  }
   if (token && tokenStatus === 'validating') {
     return <Screen><p style={{ color: '#64748b' }}>Validating link...</p></Screen>;
   }
