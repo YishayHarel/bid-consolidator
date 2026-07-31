@@ -177,6 +177,7 @@ router.get('/:id/factories', requireAuth, ownProject, async (req, res) => {
       `SELECT pf.*,
               COALESCE(f.name, pf.factory_name) AS display_name,
               array_to_string(f.emails, ', ') AS email,
+              f.contact_name,
               COUNT(DISTINCT q.item_index)::int AS items_received,
               CASE WHEN pf.submitted_at IS NOT NULL THEN 'submitted'
                    WHEN pf.submitted_at IS NULL AND NOW() - pf.invited_at > interval '2 days' THEN 'no_response'
@@ -185,7 +186,7 @@ router.get('/:id/factories', requireAuth, ownProject, async (req, res) => {
        LEFT JOIN factories f ON f.id = pf.factory_id
        LEFT JOIN quotes q ON q.project_id = pf.project_id AND q.factory_name = pf.factory_name AND q.item_index IS NOT NULL
        WHERE pf.project_id=$1
-       GROUP BY pf.id, f.name, f.emails
+       GROUP BY pf.id, f.name, f.emails, f.contact_name
        ORDER BY pf.factory_name`,
       [req.params.id]
     );
@@ -217,7 +218,7 @@ router.post('/:id/factories', requireAuth, ownProject, async (req, res) => {
           if (!factory) continue;
         } else {
           if (!entry.name || !entry.name.trim()) continue;
-          factory = await upsertFactory(client, req.user.id, entry.name, entry.emails ?? entry.email);
+          factory = await upsertFactory(client, req.user.id, entry.name, entry.emails ?? entry.email, entry.contact_name);
         }
 
         const { rows: pfRows } = await client.query(

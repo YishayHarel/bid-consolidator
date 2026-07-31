@@ -73,7 +73,7 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
     // Get tokens + all email addresses for each factory. A factory can have
     // several emails; we join them so a single message goes to all of them.
     const { rows: tokens } = await pool.query(
-      `SELECT pf.factory_name, vt.token, array_to_string(f.emails, ', ') AS email
+      `SELECT pf.factory_name, vt.token, array_to_string(f.emails, ', ') AS email, f.contact_name
        FROM project_factories pf
        LEFT JOIN vendor_tokens vt ON vt.project_factory_id = pf.id
        LEFT JOIN factories f ON f.id = pf.factory_id
@@ -84,10 +84,16 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
 
     const tokenMap = {};
     const emailMap = {};
+    const contactMap = {};
     tokens.forEach(t => {
       tokenMap[t.factory_name] = t.token;
       emailMap[t.factory_name] = t.email || null;
+      if (t.contact_name) contactMap[t.factory_name] = t.contact_name;
     });
+    // Greet the contact person if we have one, otherwise the factory name.
+    const greet = (factoryName) => contactMap[factoryName] || factoryName;
+    // Sign as the logged-in user (falls back to the org name).
+    const senderName = req.user.name || 'Shalom International';
 
     const p = project[0];
     const drafts = [];
@@ -101,7 +107,7 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
         type: 'vendor_invite',
         factory_name: f.factory_name,
         subject: `Quote Request: ${p.name}`,
-        body: `Hi ${f.factory_name},\n\nWe're requesting a quote for the following project:\n\nProject: ${p.name}\nBuyer: ${p.buyer || 'N/A'}\nDivision: ${p.division || 'N/A'}\n\nPlease submit your quote using this link:\n${link}\n\nIf you have any questions, please let us know.\n\nBest regards,\nShalom International`,
+        body: `Hi ${greet(f.factory_name)},\n\nI hope you're doing well!\n\nWe're very excited about launching our new ${p.name} program and believe it has tremendous potential. As you know, the market has become extremely competitive, with pricing coming down significantly over the past year — so it's very important that we receive the most competitive FOB pricing possible. With the right partner, we believe this program can grow into a significant, long-term business.\n\nPlease see the attached Excel file with the items we've selected for our initial launch. If the file includes more than one tab, please quote all of them.\n\nPlease complete the attached file with your best FOB pricing for each item. We are looking for:\n\n• The most competitive pricing\n• Excellent quality\n\nYou can submit your completed pricing through our Supplier Portal:\n${link}\n\nWe're excited about the opportunity to build both a successful launch and a long-term business together, and we look forward to reviewing your pricing.\n\nThank you!\n${senderName}`,
         status: f.status,
         to: emailMap[f.factory_name] || null,
         project_id: p.id,
@@ -119,7 +125,7 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
           type: 'follow_up_reminder',
           factory_name: f.factory_name,
           subject: `Reminder: Quote Request for ${p.name}`,
-          body: `Hi ${f.factory_name},\n\nWe haven't received your quote for ${p.name} yet. The deadline is approaching.\n\nPlease submit your quote as soon as possible using this link:\n${link}\n\nThank you!`,
+          body: `Hi ${greet(f.factory_name)},\n\nJust following up — we haven't received your quote for ${p.name} yet, and the deadline is approaching.\n\nPlease submit your best FOB pricing as soon as possible through our Supplier Portal:\n${link}\n\nThank you!\n${senderName}`,
           status: 'no_response',
           to: emailMap[f.factory_name] || null,
           project_id: p.id,
@@ -189,7 +195,7 @@ router.get('/project/:projectId', requireAuth, async (req, res) => {
         type: 'revision_request',
         factory_name: factoryName,
         subject: `Best & Final Pricing Request: ${p.name}`,
-        body: `Hi ${factoryName},\n\nThank you for submitting your quotation.\n\nAfter reviewing all supplier quotations, we'd like to give you one final opportunity to revise your pricing.\n\nThe following item(s) came in above our current best price:\n\n${lines}\n\nIf you would like to remain competitive for this project, please review your pricing and submit your best and final quotation through the Supplier Portal.\n\nSupplier Portal: ${link}\n\nPlease submit any revised pricing by [Due Date].\n\nThank you, and we look forward to your updated quotation.\n\nBest Regards,\nJack Shalom\nVice President\nShalom International Corp.`,
+        body: `Hi ${greet(factoryName)},\n\nThank you for submitting your quotation.\n\nAfter reviewing all supplier quotations, we'd like to give you one final opportunity to revise your pricing.\n\nThe following item(s) came in above our current best price:\n\n${lines}\n\nIf you would like to remain competitive for this project, please review your pricing and submit your best and final quotation through the Supplier Portal.\n\nSupplier Portal: ${link}\n\nPlease submit any revised pricing by [Due Date].\n\nThank you, and we look forward to your updated quotation.\n\nBest Regards,\n${senderName}`,
         status: 'competitive',
         to: emailMap[factoryName] || null,
         project_id: p.id,

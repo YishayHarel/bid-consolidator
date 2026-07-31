@@ -103,6 +103,8 @@ async function migrate() {
     // supports multiple email addresses per factory.
     await client.query(`ALTER TABLE factories ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id);`);
     await client.query(`ALTER TABLE factories ADD COLUMN IF NOT EXISTS emails TEXT[];`);
+    // Contact person the emails are addressed to (e.g. "Beddy").
+    await client.query(`ALTER TABLE factories ADD COLUMN IF NOT EXISTS contact_name VARCHAR(255);`);
     // Backfill the new emails[] array from the legacy single email column.
     await client.query(`
       UPDATE factories

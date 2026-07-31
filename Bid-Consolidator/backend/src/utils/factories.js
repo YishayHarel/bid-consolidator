@@ -10,15 +10,17 @@ function normalizeEmails(input) {
 // Insert or update a factory in the owner's directory. Uniqueness is per-owner
 // (created_by, lower(name)), so different users can each have a factory of the
 // same name. `emails` accepts an array or a comma-separated string.
-async function upsertFactory(client, ownerId, name, emails) {
+async function upsertFactory(client, ownerId, name, emails, contactName) {
   const cleanName = String(name || '').trim();
   const cleanEmails = normalizeEmails(emails);
+  const cleanContact = String(contactName || '').trim() || null;
   const { rows } = await client.query(
-    `INSERT INTO factories (name, emails, created_by) VALUES ($1, $2, $3)
+    `INSERT INTO factories (name, emails, contact_name, created_by) VALUES ($1, $2, $3, $4)
      ON CONFLICT (created_by, LOWER(name)) DO UPDATE
-       SET emails = CASE WHEN cardinality($2::text[]) > 0 THEN EXCLUDED.emails ELSE factories.emails END
-     RETURNING id, name, emails, created_by`,
-    [cleanName, cleanEmails, ownerId]
+       SET emails = CASE WHEN cardinality($2::text[]) > 0 THEN EXCLUDED.emails ELSE factories.emails END,
+           contact_name = COALESCE(EXCLUDED.contact_name, factories.contact_name)
+     RETURNING id, name, emails, contact_name, created_by`,
+    [cleanName, cleanEmails, cleanContact, ownerId]
   );
   return rows[0];
 }

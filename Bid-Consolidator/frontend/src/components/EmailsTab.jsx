@@ -147,7 +147,11 @@ export default function EmailsTab() {
                     />
                   </>
                 ) : (
-                  <div style={s.body}>{draft.body}</div>
+                  <textarea
+                    style={s.bodyEdit}
+                    value={effBody}
+                    onChange={e => setEditedBodies(b => ({ ...b, [draftId]: e.target.value }))}
+                  />
                 )}
                 {draft.attachment && (
                   <div style={s.attachment}>📎 {draft.attachment}</div>

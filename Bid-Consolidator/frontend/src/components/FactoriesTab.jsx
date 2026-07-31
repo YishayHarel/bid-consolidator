@@ -7,6 +7,7 @@ export default function FactoriesTab() {
   const [edits, setEdits] = useState({});
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
+  const [newContact, setNewContact] = useState('');
   const [adding, setAdding] = useState(false);
 
   useEffect(() => { load(); }, []);
@@ -25,10 +26,11 @@ export default function FactoriesTab() {
     if (!newName.trim()) return;
     setAdding(true);
     try {
-      const { data } = await api.post('/factories', { name: newName.trim(), email: newEmail.trim() });
+      const { data } = await api.post('/factories', { name: newName.trim(), email: newEmail.trim(), contact_name: newContact.trim() });
       setFactories(fs => [...fs, data].sort((a, b) => a.name.localeCompare(b.name)));
       setNewName('');
       setNewEmail('');
+      setNewContact('');
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to add factory');
     }
@@ -39,7 +41,7 @@ export default function FactoriesTab() {
     const edit = edits[id];
     if (!edit) return;
     try {
-      const { data } = await api.patch(`/factories/${id}`, { name: edit.name, email: edit.email });
+      const { data } = await api.patch(`/factories/${id}`, { name: edit.name, email: edit.email, contact_name: edit.contact_name });
       setFactories(fs => fs.map(f => f.id === id ? data : f));
       setEdits(e => ({ ...e, [id]: undefined }));
     } catch (err) {
@@ -62,7 +64,7 @@ export default function FactoriesTab() {
   }
 
   function setField(f, key, value) {
-    setEdits(e => ({ ...e, [f.id]: { name: fieldValue(f, 'name'), email: fieldValue(f, 'email'), ...e[f.id], [key]: value } }));
+    setEdits(e => ({ ...e, [f.id]: { name: fieldValue(f, 'name'), email: fieldValue(f, 'email'), contact_name: fieldValue(f, 'contact_name'), ...e[f.id], [key]: value } }));
   }
 
   return (
@@ -74,7 +76,8 @@ export default function FactoriesTab() {
 
       <form onSubmit={addFactory} style={s.addForm}>
         <input style={s.input} placeholder="Factory name" value={newName} onChange={e => setNewName(e.target.value)} />
-        <input style={{ ...s.input, minWidth: 320, flex: 1 }} placeholder="Emails (comma-separated)" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
+        <input style={{ ...s.input, minWidth: 260, flex: 1 }} placeholder="Emails (comma-separated)" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
+        <input style={s.input} placeholder="Contact name" value={newContact} onChange={e => setNewContact(e.target.value)} />
         <button style={s.saveBtn} disabled={adding}>{adding ? 'Adding...' : '+ Add Factory'}</button>
       </form>
 
@@ -89,6 +92,7 @@ export default function FactoriesTab() {
               <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                 <th style={s.th}>Name</th>
                 <th style={s.th}>Emails (comma-separated)</th>
+                <th style={s.th}>Contact Name</th>
                 <th style={s.th}></th>
               </tr>
             </thead>
@@ -103,6 +107,11 @@ export default function FactoriesTab() {
                   <td style={s.td}>
                     <input style={s.rowInput} value={fieldValue(f, 'email')}
                       onChange={e => setField(f, 'email', e.target.value)}
+                      onBlur={() => saveEdit(f.id)} />
+                  </td>
+                  <td style={s.td}>
+                    <input style={s.rowInput} placeholder="—" value={fieldValue(f, 'contact_name')}
+                      onChange={e => setField(f, 'contact_name', e.target.value)}
                       onBlur={() => saveEdit(f.id)} />
                   </td>
                   <td style={s.td}>

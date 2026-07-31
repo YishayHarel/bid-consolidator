@@ -9,14 +9,14 @@ const router = express.Router();
 // `email` string (so single-email UI keeps working).
 function shape(row) {
   const emails = row.emails || [];
-  return { id: row.id, name: row.name, emails, email: emails.join(', ') };
+  return { id: row.id, name: row.name, emails, email: emails.join(', '), contact_name: row.contact_name || '' };
 }
 
 // List the logged-in user's factory directory
 router.get('/', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, name, emails FROM factories WHERE created_by=$1 ORDER BY name',
+      'SELECT id, name, emails, contact_name FROM factories WHERE created_by=$1 ORDER BY name',
       [req.user.id]
     );
     res.json(rows.map(shape));
@@ -28,10 +28,10 @@ router.get('/', requireAuth, async (req, res) => {
 
 // Add a factory to the user's directory (accepts `emails` array or `email` string)
 router.post('/', requireAuth, async (req, res) => {
-  const { name, email, emails } = req.body;
+  const { name, email, emails, contact_name } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
   try {
-    const factory = await upsertFactory(pool, req.user.id, name, emails ?? email);
+    const factory = await upsertFactory(pool, req.user.id, name, emails ?? email, contact_name);
     res.status(201).json(shape(factory));
   } catch (err) {
     console.error(err);
@@ -41,16 +41,17 @@ router.post('/', requireAuth, async (req, res) => {
 
 // Update a factory's name/emails (only the user's own)
 router.patch('/:id', requireAuth, async (req, res) => {
-  const { name, email, emails } = req.body;
+  const { name, email, emails, contact_name } = req.body;
   const cleanEmails = normalizeEmails(emails ?? email);
   try {
     const { rows } = await pool.query(
       `UPDATE factories
          SET name = COALESCE($1, name),
-             emails = $2
+             emails = $2,
+             contact_name = NULLIF($5, '')
        WHERE id=$3 AND created_by=$4
-       RETURNING id, name, emails`,
-      [name || null, cleanEmails, req.params.id, req.user.id]
+       RETURNING id, name, emails, contact_name`,
+      [name || null, cleanEmails, req.params.id, req.user.id, (contact_name || '').trim()]
     );
     if (!rows.length) return res.status(404).json({ error: 'Factory not found' });
     res.json(shape(rows[0]));
