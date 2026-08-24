@@ -105,6 +105,11 @@ async function migrate() {
     await client.query(`ALTER TABLE factories ADD COLUMN IF NOT EXISTS emails TEXT[];`);
     // Contact person the emails are addressed to (e.g. "Beddy").
     await client.query(`ALTER TABLE factories ADD COLUMN IF NOT EXISTS contact_name VARCHAR(255);`);
+    // Divisions a factory serves (a factory can belong to several). Filtering the
+    // invite picker uses this so, e.g., a Hydration project only shows Hydration
+    // factories. Pre-existing factories (all drinkware) backfill to Hydration.
+    await client.query(`ALTER TABLE factories ADD COLUMN IF NOT EXISTS divisions TEXT[];`);
+    await client.query(`UPDATE factories SET divisions = ARRAY['Hydration'] WHERE divisions IS NULL;`);
     // Backfill the new emails[] array from the legacy single email column.
     await client.query(`
       UPDATE factories

@@ -1,22 +1,25 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
-const { upsertFactory, normalizeEmails } = require('../utils/factories');
+const { upsertFactory, normalizeEmails, normalizeList } = require('../utils/factories');
 
 const router = express.Router();
 
 // Shape a DB row for the client: expose both the emails[] array and a joined
-// `email` string (so single-email UI keeps working).
+// `email` string (so single-email UI keeps working), plus divisions[].
 function shape(row) {
   const emails = row.emails || [];
-  return { id: row.id, name: row.name, emails, email: emails.join(', '), contact_name: row.contact_name || '' };
+  return {
+    id: row.id, name: row.name, emails, email: emails.join(', '),
+    contact_name: row.contact_name || '', divisions: row.divisions || [],
+  };
 }
 
 // List the logged-in user's factory directory
 router.get('/', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, name, emails, contact_name FROM factories WHERE created_by=$1 ORDER BY name',
+      'SELECT id, name, emails, contact_name, divisions FROM factories WHERE created_by=$1 ORDER BY name',
       [req.user.id]
     );
     res.json(rows.map(shape));
@@ -28,10 +31,10 @@ router.get('/', requireAuth, async (req, res) => {
 
 // Add a factory to the user's directory (accepts `emails` array or `email` string)
 router.post('/', requireAuth, async (req, res) => {
-  const { name, email, emails, contact_name } = req.body;
+  const { name, email, emails, contact_name, divisions } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
   try {
-    const factory = await upsertFactory(pool, req.user.id, name, emails ?? email, contact_name);
+    const factory = await upsertFactory(pool, req.user.id, name, emails ?? email, contact_name, divisions);
     res.status(201).json(shape(factory));
   } catch (err) {
     console.error(err);
@@ -41,17 +44,19 @@ router.post('/', requireAuth, async (req, res) => {
 
 // Update a factory's name/emails (only the user's own)
 router.patch('/:id', requireAuth, async (req, res) => {
-  const { name, email, emails, contact_name } = req.body;
+  const { name, email, emails, contact_name, divisions } = req.body;
   const cleanEmails = normalizeEmails(emails ?? email);
+  const cleanDivisions = normalizeList(divisions);
   try {
     const { rows } = await pool.query(
       `UPDATE factories
          SET name = COALESCE($1, name),
              emails = $2,
-             contact_name = NULLIF($5, '')
+             contact_name = NULLIF($5, ''),
+             divisions = $6
        WHERE id=$3 AND created_by=$4
-       RETURNING id, name, emails, contact_name`,
-      [name || null, cleanEmails, req.params.id, req.user.id, (contact_name || '').trim()]
+       RETURNING id, name, emails, contact_name, divisions`,
+      [name || null, cleanEmails, req.params.id, req.user.id, (contact_name || '').trim(), cleanDivisions]
     );
     if (!rows.length) return res.status(404).json({ error: 'Factory not found' });
     res.json(shape(rows[0]));

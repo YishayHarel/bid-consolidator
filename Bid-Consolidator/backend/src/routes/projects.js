@@ -218,7 +218,7 @@ router.post('/:id/factories', requireAuth, ownProject, async (req, res) => {
           if (!factory) continue;
         } else {
           if (!entry.name || !entry.name.trim()) continue;
-          factory = await upsertFactory(client, req.user.id, entry.name, entry.emails ?? entry.email, entry.contact_name);
+          factory = await upsertFactory(client, req.user.id, entry.name, entry.emails ?? entry.email, entry.contact_name, entry.divisions);
         }
 
         const { rows: pfRows } = await client.query(

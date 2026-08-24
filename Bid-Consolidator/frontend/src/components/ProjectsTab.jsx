@@ -20,6 +20,7 @@ export default function ProjectsTab() {
   const [showOtherForm, setShowOtherForm] = useState(false);
   const [otherName, setOtherName] = useState('');
   const [otherEmail, setOtherEmail] = useState('');
+  const [showAllDivisions, setShowAllDivisions] = useState(false);
 
   useEffect(() => { load(); }, []);
 
@@ -95,9 +96,9 @@ export default function ProjectsTab() {
     });
   }
 
-  function addOtherFactory() {
+  function addOtherFactory(division) {
     if (!otherName.trim()) return;
-    setSelectedToInvite(sel => [...sel, { name: otherName.trim(), email: otherEmail.trim() }]);
+    setSelectedToInvite(sel => [...sel, { name: otherName.trim(), email: otherEmail.trim(), divisions: division ? [division] : [] }]);
     setOtherName('');
     setOtherEmail('');
     setShowOtherForm(false);
@@ -196,9 +197,22 @@ export default function ProjectsTab() {
                       <input style={s.input} placeholder="Search factories..."
                         value={factorySearch} onChange={e => setFactorySearch(e.target.value)} />
 
+                      {p.division ? (
+                        <div style={s.divRow}>
+                          <span>Showing <strong>{p.division}</strong> factories</span>
+                          <label style={s.divToggle}>
+                            <input type="checkbox" checked={showAllDivisions} onChange={e => setShowAllDivisions(e.target.checked)} />
+                            Show all divisions
+                          </label>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#b45309', margin: '2px 0 6px' }}>No division set on this project — showing all factories.</div>
+                      )}
+
                       <div style={s.factoryDropdown}>
                         {allFactories
                           .filter(f => f.name.toLowerCase().includes(factorySearch.toLowerCase()))
+                          .filter(f => showAllDivisions || !p.division || (f.divisions || []).some(d => d.toLowerCase() === p.division.toLowerCase()))
                           .map(f => {
                             const checked = selectedToInvite.some(s => s.factory_id === f.id);
                             return (
@@ -209,8 +223,16 @@ export default function ProjectsTab() {
                               </label>
                             );
                           })}
-                        {allFactories.length === 0 && (
-                          <div style={{ color: '#94a3b8', fontSize: 12, padding: 6 }}>No factories in directory yet.</div>
+                        {allFactories
+                          .filter(f => f.name.toLowerCase().includes(factorySearch.toLowerCase()))
+                          .filter(f => showAllDivisions || !p.division || (f.divisions || []).some(d => d.toLowerCase() === p.division.toLowerCase())).length === 0 && (
+                          <div style={{ color: '#94a3b8', fontSize: 12, padding: 6 }}>
+                            {allFactories.length === 0
+                              ? 'No factories in directory yet.'
+                              : (p.division && !showAllDivisions
+                                  ? `No ${p.division} factories. Tick "Show all divisions", or add one below.`
+                                  : 'No matches.')}
+                          </div>
                         )}
                       </div>
 
@@ -224,7 +246,7 @@ export default function ProjectsTab() {
                             value={otherName} onChange={e => setOtherName(e.target.value)} />
                           <input style={s.input} placeholder="Email"
                             value={otherEmail} onChange={e => setOtherEmail(e.target.value)} />
-                          <button type="button" style={s.saveBtn} onClick={addOtherFactory}>Add</button>
+                          <button type="button" style={s.saveBtn} onClick={() => addOtherFactory(p.division)}>Add</button>
                         </div>
                       )}
 
@@ -367,6 +389,8 @@ const s = {
   addBtn: { padding: '8px 18px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' },
   addForm: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 14, marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 },
   textarea: { width: '100%', padding: '10px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, fontFamily: 'monospace', marginBottom: 10, boxSizing: 'border-box', minHeight: 80 },
+  divRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 12, color: '#64748b', margin: '2px 0 6px', flexWrap: 'wrap' },
+  divToggle: { display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', color: '#475569', fontWeight: 600 },
   factoryDropdown: { maxHeight: 180, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff', padding: 6 },
   factoryOption: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', fontSize: 13, color: '#334155', cursor: 'pointer' },
   factoryOptionEmail: { color: '#94a3b8', fontSize: 11, marginLeft: 'auto' },
