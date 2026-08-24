@@ -38,15 +38,10 @@ export default function ProjectsTab() {
     e.preventDefault();
     setSaving(true);
     try {
-      const formData = new FormData();
-      formData.append('name', form.name);
-      formData.append('buyer', form.buyer || null);
-      formData.append('division', form.division || null);
-      if (form.templateFile) {
-        formData.append('templateFile', form.templateFile);
-      }
-      const { data } = await api.post('/projects', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      const { data } = await api.post('/projects', {
+        name: form.name,
+        buyer: form.buyer || null,
+        division: form.division || null,
       });
       setProjects(ps => [{ ...data, quote_count: 0 }, ...ps]);
       setForm({ name: '', buyer: '', division: '', templateFile: null });

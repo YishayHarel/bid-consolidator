@@ -26,15 +26,6 @@ const upload = multer({
   },
 });
 
-const templateUpload = multer({
-  dest: tmpDir,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const ok = /\.(xlsx|xls)$/i.test(file.originalname);
-    cb(ok ? null : new Error('Only Excel files allowed'), ok);
-  },
-});
-
 // CAD / design files that seed a project's items (images or PDF).
 const cadUpload = multer({
   dest: tmpDir,
@@ -82,8 +73,9 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-// Create project
-router.post('/', requireAuth, templateUpload.single('templateFile'), async (req, res) => {
+// Create project. Projects are now built from CAD design files + items (see the
+// CAD builder endpoints below), so no outbound Excel is parsed here.
+router.post('/', requireAuth, async (req, res) => {
   const { name, buyer, division, last_price } = req.body;
   if (!name) return res.status(400).json({ error: 'Name required' });
   try {
@@ -92,55 +84,7 @@ router.post('/', requireAuth, templateUpload.single('templateFile'), async (req,
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [name, buyer || null, division || null, last_price || null, req.user.id]
     );
-    const project = rows[0];
-    const cleanName = name.replace(/[^a-zA-Z0-9-]/g, '_');
-
-    // Handle the outbound template file if provided.
-    if (req.file) {
-      const templateKey = `${cleanName}/template/${Date.now()}-${req.file.originalname}`;
-      await saveObject(templateKey, fs.readFileSync(req.file.path), contentTypeFor(path.extname(req.file.originalname)));
-
-      const { rows: updated } = await pool.query(
-        'UPDATE projects SET template_path=$1 WHERE id=$2 RETURNING *',
-        [templateKey, project.id]
-      );
-      Object.assign(project, updated[0]);
-
-      // Best-effort: parse the template's items + images for the "Our Image"
-      // columns. Images are grouped by worksheet row, so a product row with
-      // several photos yields several "Our Image #N" entries. Must never fail
-      // project creation.
-      try {
-        const { quotes: items } = parseQuoteExcel(req.file.path);
-        const imagesByRow = extractImagesByRow(req.file.path);
-        for (const it of items) {
-          const photos = imagesByRow[it.excel_row] || [];
-          const keys = [];
-          for (let p = 0; p < photos.length; p++) {
-            const key = `${cleanName}/template/images/item${it.item_index}-${p}.${photos[p].ext}`;
-            await saveObject(key, photos[p].data, contentTypeFor(photos[p].ext));
-            keys.push(key);
-          }
-          await pool.query(
-            `INSERT INTO project_items (project_id, item_index, style_num, description, moq, image_path)
-             VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (project_id, item_index) DO NOTHING`,
-            [project.id, it.item_index, it.style_num || null, it.description || null, it.moq || null, keys[0] || null]
-          );
-          for (let p = 0; p < keys.length; p++) {
-            await pool.query(
-              `INSERT INTO project_item_images (project_id, item_index, position, image_path)
-               VALUES ($1,$2,$3,$4) ON CONFLICT (project_id, item_index, position) DO NOTHING`,
-              [project.id, it.item_index, p, keys[p]]
-            );
-          }
-        }
-      } catch (err) {
-        console.error('Template parse failed (non-fatal):', err);
-      }
-      fs.unlink(req.file.path, () => {});
-    }
-
-    res.status(201).json(project);
+    res.status(201).json(rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });

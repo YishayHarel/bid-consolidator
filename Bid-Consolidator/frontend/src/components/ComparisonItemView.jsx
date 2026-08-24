@@ -110,6 +110,7 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
               <th style={s.th}>Their Image</th>
               <th style={s.th}>MOQ</th>
               <th style={s.th}>Price</th>
+              <th style={s.th}>Lead Time</th>
               <th style={s.th}>Notes</th>
               <th style={s.th}>Select</th>
             </tr>
@@ -132,6 +133,7 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
                 <td style={s.imageTd}><div style={s.imagePlaceholder}>—</div></td>
                 <td style={s.td}>{moq != null ? Number(moq).toLocaleString() : '—'}</td>
                 <td style={s.td}>$—</td>
+                <td style={s.td}>—</td>
                 <td style={s.noteTd}></td>
                 <td style={s.td}></td>
               </tr>
@@ -181,6 +183,7 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
                   <td style={{ ...s.td, fontWeight: 700, color: tint.text }}>
                     ${quote.price ? parseFloat(quote.price).toFixed(2) : '—'}
                   </td>
+                  <td style={s.td}>{quote.lead_time || '—'}</td>
                   <td style={s.noteTd}>
                     <textarea
                       value={editingNotes[quote.id] ?? quote.comparison_notes ?? ''}
