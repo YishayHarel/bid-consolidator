@@ -26,15 +26,27 @@ const upload = multer({
   },
 });
 
-// CAD / design files that seed a project's items (images or PDF).
+// CAD / design files that seed a project's items. Accept the formats design
+// teams actually export (images, PDF, common vector/raster design files).
+const CAD_TYPES = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|svg|pdf|ai|eps|psd)$/i;
 const cadUpload = multer({
   dest: tmpDir,
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const ok = /\.(png|jpe?g|gif|webp|pdf)$/i.test(file.originalname);
-    cb(ok ? null : new Error('Only images or PDF files allowed'), ok);
+    if (CAD_TYPES.test(file.originalname)) return cb(null, true);
+    cb(new Error(`"${file.originalname}" isn't a supported design file (use PNG, JPG, PDF, TIFF, SVG, AI/EPS/PSD).`));
   },
 });
+// Wrap multer so type/size errors return clear JSON instead of a generic 500.
+function cadUploadMw(req, res, next) {
+  cadUpload.array('files', 100)(req, res, (err) => {
+    if (err) {
+      const msg = err.code === 'LIMIT_FILE_SIZE' ? 'A file is over the 50MB limit.' : (err.message || 'Upload rejected');
+      return res.status(400).json({ error: msg });
+    }
+    next();
+  });
+}
 
 // Ownership guard for any authenticated /:id route: the project must exist AND
 // belong to the logged-in user. Returns 404 (not 403) so we don't leak that a
@@ -96,7 +108,7 @@ router.post('/', requireAuth, async (req, res) => {
 // Upload one or more CAD/design files (images or PDF). Each file also becomes an
 // item automatically (named from the filename), so a whole batch of designs turns
 // into an item list in one shot. Add extra items manually if a CAD needs several.
-router.post('/:id/cads', requireAuth, ownProject, cadUpload.array('files', 100), async (req, res) => {
+router.post('/:id/cads', requireAuth, ownProject, cadUploadMw, async (req, res) => {
   if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
   try {
     const { rows: proj } = await pool.query('SELECT name FROM projects WHERE id=$1', [req.params.id]);
