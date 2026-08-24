@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { API_BASE } from '../utils/api';
@@ -7,231 +7,187 @@ export default function VendorPortal() {
   const [params] = useSearchParams();
   const token = params.get('token');
 
-  // Token mode
-  const [tokenStatus, setTokenStatus] = useState(token ? 'validating' : null);
-  const [tokenFactory, setTokenFactory] = useState('');
-  const [tokenProjectId, setTokenProjectId] = useState(null);
-  const [projectInfo, setProjectInfo] = useState(null);
-  const [templateInfo, setTemplateInfo] = useState(null); // { has, name }
-
-  // Open mode
-  const [factoryName, setFactoryName] = useState('');
-  const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState('');
-
-  // Shared
-  const [uploadState, setUploadState] = useState('idle');
-  const [uploadError, setUploadError] = useState('');
-  const [dragOver, setDragOver] = useState(false);
-  const fileRef = useRef();
+  const [status, setStatus] = useState(token ? 'validating' : 'no-token'); // validating|valid|invalid|expired|used|no-token
+  const [factory, setFactory] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [projectId, setProjectId] = useState(null);
+  const [items, setItems] = useState([]);
+  const [rows, setRows] = useState({});      // item_index -> { bidding, price, moq, lead_time }
+  const [saving, setSaving] = useState({});   // item_index -> bool
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (token) {
-      axios.get(`${API_BASE}/vendor/validate/${token}`)
-        .then(({ data }) => {
-          if (data.status === 'valid') {
-            setTokenStatus('valid');
-            setTokenFactory(data.factory_name);
-            setTokenProjectId(data.project_id);
-            setTemplateInfo({ has: data.has_template, name: data.template_name });
-            if (data.project_id) {
-              axios.get(`${API_BASE}/projects/${data.project_id}`).then(r => setProjectInfo(r.data)).catch(() => {});
-            }
-          } else {
-            setTokenStatus(data.status);
-          }
-        })
-        .catch(() => setTokenStatus('invalid'));
-    } else {
-      axios.get(`${API_BASE}/vendor/open-projects`)
-        .then(({ data }) => {
-          setProjects(data);
-          if (data.length > 0) setSelectedProject(String(data[0].id));
-        })
-        .catch(() => {});
-    }
+    if (!token) return;
+    axios.get(`${API_BASE}/vendor/items/${token}`)
+      .then(({ data }) => {
+        if (data.status !== 'valid') { setStatus(data.status); setFactory(data.factory_name || ''); return; }
+        setStatus('valid');
+        setFactory(data.factory_name);
+        setProjectName(data.project_name);
+        setProjectId(data.project_id);
+        setItems(data.items);
+        const init = {};
+        data.items.forEach(it => {
+          const q = it.quote;
+          init[it.item_index] = {
+            bidding: !!q,
+            price: q?.price ?? '',
+            moq: q?.moq ?? '',
+            lead_time: q?.lead_time ?? '',
+          };
+        });
+        setRows(init);
+      })
+      .catch(() => setStatus('invalid'));
   }, [token]);
 
-  async function handleFile(file) {
-    if (!file) return;
-    if (!/\.(xlsx|xls)$/i.test(file.name)) {
-      setUploadError('Please upload an Excel file (.xlsx or .xls)');
-      return;
-    }
-    if (!token && !factoryName.trim()) {
-      setUploadError('Please enter your factory name first.');
-      return;
-    }
-    if (!token && !selectedProject) {
-      setUploadError('Please select a project.');
-      return;
-    }
-    setUploadError('');
-    setUploadState('uploading');
+  function setField(idx, key, value) {
+    setRows(r => ({ ...r, [idx]: { ...r[idx], [key]: value } }));
+  }
 
-    const form = new FormData();
-    form.append('file', file);
-
+  async function saveItem(idx, override) {
+    const row = { ...rows[idx], ...(override || {}) };
+    const item = items.find(i => i.item_index === idx);
+    setSaving(s => ({ ...s, [idx]: true }));
     try {
-      if (token) {
-        await axios.post(`${API_BASE}/vendor/submit/${token}`, form);
-      } else {
-        form.append('factory_name', factoryName.trim());
-        form.append('project_id', selectedProject);
-        await axios.post(`${API_BASE}/vendor/submit-open`, form);
-      }
-      setUploadState('success');
+      await axios.post(`${API_BASE}/vendor/quote-item/${token}`, {
+        item_index: idx,
+        bidding: row.bidding,
+        price: row.price,
+        moq: row.moq,
+        lead_time: row.lead_time,
+        style_num: item?.style_num,
+        description: item?.description,
+      });
     } catch (err) {
-      setUploadError(err.response?.data?.error || 'Upload failed. Please try again.');
-      setUploadState('idle');
+      setError(err.response?.data?.error || 'Save failed');
     }
+    setSaving(s => ({ ...s, [idx]: false }));
   }
 
-  function onDrop(e) {
-    e.preventDefault();
-    setDragOver(false);
-    handleFile(e.dataTransfer.files[0]);
+  function toggleBid(idx) {
+    const next = !rows[idx]?.bidding;
+    setField(idx, 'bidding', next);
+    saveItem(idx, { bidding: next });
   }
 
-  const displayName = token ? tokenFactory : factoryName;
-
-  // The tokenless portal is disabled — factories can only submit via an invite link.
-  if (!token) {
-    return <Screen><StatusBox color="#fff7ed" border="#fdba74" title="Invite Link Required" message="Please use the personal upload link we emailed you to submit your quote. If you don't have one, contact Shalom International and we'll send it over." /></Screen>;
-  }
-  if (token && tokenStatus === 'validating') {
-    return <Screen><p style={{ color: '#64748b' }}>Validating link...</p></Screen>;
-  }
-  if (token && tokenStatus === 'invalid') {
-    return <Screen><StatusBox color="#fee2e2" border="#fca5a5" title="Invalid Link" message="This upload link is invalid." /></Screen>;
-  }
-  if (token && tokenStatus === 'expired') {
-    return <Screen><StatusBox color="#fff7ed" border="#fdba74" title="Link Expired" message="This upload link has expired. Please contact Shalom International for a new link." /></Screen>;
-  }
-  if (token && tokenStatus === 'used') {
-    return <Screen><StatusBox color="#f0fdf4" border="#86efac" title="Already Submitted" message={`A quote from ${tokenFactory} has already been submitted with this link.`} /></Screen>;
+  async function submitAll() {
+    setSubmitting(true);
+    try {
+      await axios.post(`${API_BASE}/vendor/submit-quotes/${token}`, {});
+      setSubmitted(true);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Submit failed');
+    }
+    setSubmitting(false);
   }
 
-  if (uploadState === 'success') {
-    return (
-      <Screen>
-        <StatusBox color="#f0fdf4" border="#86efac"
-          title="Quote Submitted!"
-          message={`Thank you${displayName ? `, ${displayName}` : ''}. Your quote has been received.`} />
-      </Screen>
-    );
+  // ---- status screens ----
+  if (status === 'no-token') {
+    return <Screen><StatusBox color="#fff7ed" border="#fdba74" title="Invite Link Required" message="Please use the personal quote link we emailed you. If you don't have one, contact Shalom International and we'll send it over." /></Screen>;
   }
+  if (status === 'validating') return <Screen><p style={{ color: '#64748b' }}>Loading your quote sheet…</p></Screen>;
+  if (status === 'invalid') return <Screen><StatusBox color="#fee2e2" border="#fca5a5" title="Invalid Link" message="This quote link is invalid." /></Screen>;
+  if (status === 'expired') return <Screen><StatusBox color="#fff7ed" border="#fdba74" title="Link Expired" message="This quote link has expired. Please contact Shalom International for a new one." /></Screen>;
+  if (status === 'used') return <Screen><StatusBox color="#f0fdf4" border="#86efac" title="Already Submitted" message={`A quote from ${factory || 'your factory'} has already been submitted with this link.`} /></Screen>;
+  if (submitted) return <Screen><StatusBox color="#f0fdf4" border="#86efac" title="Quote Submitted!" message={`Thank you, ${factory}. Your pricing has been received.`} /></Screen>;
+
+  const biddingCount = Object.values(rows).filter(r => r?.bidding).length;
 
   return (
-    <Screen>
+    <div style={s.page}>
       <div style={s.card}>
         <div style={s.header}>
           <div style={s.logoMark}>S</div>
-          <div>
-            <div style={s.company}>Shalom International</div>
-            <div style={s.sub}>Factory Quote Upload</div>
+          <div style={{ flex: 1 }}>
+            <div style={s.company}>Shalom International — Supplier Quote Portal</div>
+            <div style={s.sub}>{projectName} · <strong>{factory}</strong></div>
           </div>
+          <div style={s.sealed}>🔒 Your pricing is private</div>
         </div>
 
-        {token && (tokenFactory || projectInfo) && (
-          <div style={s.infoBlock}>
-            {projectInfo && (
-              <div style={s.projectInfo}>
-                <div style={s.infoLabel}>Project</div>
-                <div style={s.infoValue}>{projectInfo.name}</div>
-                {(projectInfo.buyer || projectInfo.division) && (
-                  <div style={s.infoMeta}>{[projectInfo.buyer, projectInfo.division].filter(Boolean).join(' • ')}</div>
-                )}
-              </div>
-            )}
-            {tokenFactory && (
-              <div style={s.factoryInfo}>
-                <div style={s.infoLabel}>Your Factory</div>
-                <div style={s.infoValue}>{tokenFactory}</div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {token && templateInfo?.has && (
-          <div style={s.downloadBlock}>
-            <div style={s.downloadLabel}>Step 1 — Download the quote template, fill in your pricing</div>
-            <a href={`${API_BASE}/vendor/template/${token}`} style={s.downloadBtn} download>
-              ⬇ Download quote template{templateInfo.name ? ` — ${templateInfo.name}` : ''}
-            </a>
-            <div style={s.downloadHint}>Step 2 — Complete it, then upload it below.</div>
-          </div>
-        )}
-
-        {!token && (
+        {items.length === 0 ? (
+          <div style={{ color: '#94a3b8', padding: 24, textAlign: 'center' }}>No items to quote yet.</div>
+        ) : (
           <>
-            <div style={s.fieldWrap}>
-              <label style={s.label}>Your Factory Name</label>
-              <input style={s.input} type="text" placeholder="e.g. Sunrise Manufacturing Co."
-                value={factoryName} onChange={e => setFactoryName(e.target.value)}
-                disabled={uploadState === 'uploading'} />
+            <div style={s.instructions}>
+              Enter your best FOB pricing for the items you want. Tick <strong>Bid</strong> to quote an item, or leave it unticked to skip it. Your entries save automatically.
             </div>
-            <div style={s.fieldWrap}>
-              <label style={s.label}>Project</label>
-              {projects.length === 0 ? (
-                <div style={{ fontSize: 13, color: '#94a3b8' }}>No open projects available.</div>
-              ) : (
-                <select style={s.input} value={selectedProject} onChange={e => setSelectedProject(e.target.value)}>
-                  {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
-                </select>
-              )}
+            <div style={s.tableWrap}>
+              <table style={s.table}>
+                <thead>
+                  <tr>
+                    <th style={{ ...s.th, textAlign: 'center' }}>Bid?</th>
+                    <th style={s.th}>Design</th>
+                    <th style={s.th}>Item</th>
+                    <th style={s.th}>Your FOB $</th>
+                    <th style={s.th}>MOQ</th>
+                    <th style={s.th}>Lead time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map(it => {
+                    const r = rows[it.item_index] || {};
+                    const on = !!r.bidding;
+                    return (
+                      <tr key={it.item_index} style={{ ...s.row, opacity: on ? 1 : 0.55 }}>
+                        <td style={{ ...s.td, textAlign: 'center' }}>
+                          <input type="checkbox" checked={on} onChange={() => toggleBid(it.item_index)} style={{ width: 16, height: 16 }} />
+                        </td>
+                        <td style={s.td}>
+                          <img src={`${API_BASE}/projects/${projectId}/item-image/${it.item_index}/0`} style={s.thumb}
+                            onError={(e) => { e.target.style.visibility = 'hidden'; }} />
+                        </td>
+                        <td style={s.td}>
+                          <div style={{ fontWeight: 700 }}>{it.style_num || `Item ${it.item_index + 1}`}</div>
+                          {it.description && <div style={s.itemDesc}>{it.description}</div>}
+                        </td>
+                        <td style={s.td}>
+                          <span style={s.dollar}>$</span>
+                          <input type="number" step="0.01" disabled={!on} value={r.price ?? ''}
+                            onChange={e => setField(it.item_index, 'price', e.target.value)}
+                            onBlur={() => saveItem(it.item_index)} style={s.inp} placeholder="—" />
+                        </td>
+                        <td style={s.td}>
+                          <input type="number" disabled={!on} value={r.moq ?? ''}
+                            onChange={e => setField(it.item_index, 'moq', e.target.value)}
+                            onBlur={() => saveItem(it.item_index)} style={s.inp} placeholder="—" />
+                        </td>
+                        <td style={s.td}>
+                          <input type="text" disabled={!on} value={r.lead_time ?? ''}
+                            onChange={e => setField(it.item_index, 'lead_time', e.target.value)}
+                            onBlur={() => saveItem(it.item_index)} style={{ ...s.inp, width: 90 }} placeholder="e.g. 45 days" />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {error && <div style={s.errorBox}>{error}</div>}
+
+            <div style={s.footer}>
+              <div style={{ fontSize: 13, color: '#64748b' }}>Quoting <strong>{biddingCount}</strong> of {items.length} items · saved automatically</div>
+              <button style={{ ...s.submitBtn, opacity: submitting ? 0.7 : 1 }} disabled={submitting || biddingCount === 0} onClick={submitAll}>
+                {submitting ? 'Submitting…' : 'Submit my quote →'}
+              </button>
             </div>
           </>
         )}
-
-        <div
-          style={{ ...s.dropzone, ...(dragOver ? s.dropzoneOver : {}), ...(uploadState === 'uploading' ? s.dropzoneUploading : {}) }}
-          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
-          onClick={() => uploadState !== 'uploading' && fileRef.current?.click()}
-        >
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
-            onChange={e => handleFile(e.target.files[0])} />
-          <div style={s.uploadIcon}>
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-          </div>
-          <div style={s.dropText}>{uploadState === 'uploading' ? 'Uploading...' : 'Drop your Excel file here'}</div>
-          <div style={s.dropSub}>or click to browse — .xlsx or .xls, max 10MB</div>
-        </div>
-
-        {uploadError && <div style={s.errorBox}>{uploadError}</div>}
-
-        <div style={s.instructions}>
-          <div style={s.instTitle}>Your quote sheet should include:</div>
-          <ul style={s.instList}>
-            <li>Factory name in cell A1</li>
-            <li>Style #, Description, Category</li>
-            <li>Color, Scent / Fragrance, Packaging</li>
-            <li>MOQ, Price 1</li>
-            <li>Benchmark Product Link (optional)</li>
-          </ul>
-        </div>
       </div>
-    </Screen>
-  );
-}
-
-function Screen({ children }) {
-  return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: 20 }}>
-      {children}
     </div>
   );
 }
 
+function Screen({ children }) {
+  return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: 20 }}>{children}</div>;
+}
 function StatusBox({ color, border, title, message }) {
   return (
-    <div style={{ background: color, border: `1px solid ${border}`, borderRadius: 12, padding: '36px 40px', maxWidth: 440, textAlign: 'center' }}>
+    <div style={{ background: color, border: `1px solid ${border}`, borderRadius: 12, padding: '36px 40px', maxWidth: 460, textAlign: 'center' }}>
       <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>{title}</div>
       <div style={{ color: '#475569', lineHeight: 1.6 }}>{message}</div>
     </div>
@@ -239,33 +195,24 @@ function StatusBox({ color, border, title, message }) {
 }
 
 const s = {
-  card: { background: '#fff', borderRadius: 12, padding: 36, width: '100%', maxWidth: 500, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' },
-  header: { display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 },
-  logoMark: { width: 40, height: 40, background: '#0f172a', color: '#fff', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700 },
-  company: { fontSize: 16, fontWeight: 700, color: '#0f172a' },
-  sub: { fontSize: 12, color: '#64748b' },
-  infoBlock: { display: 'flex', gap: 14, marginBottom: 20, flexWrap: 'wrap' },
-  projectInfo: { background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 7, padding: '10px 14px', flex: '1 1 auto', minWidth: 180 },
-  factoryInfo: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 7, padding: '10px 14px', flex: '1 1 auto', minWidth: 180 },
-  infoLabel: { fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 3 },
-  infoValue: { fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 2 },
-  infoMeta: { fontSize: 11, color: '#64748b' },
-  factoryBadge: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 7, padding: '8px 14px', fontSize: 13, marginBottom: 20 },
-  fieldWrap: { marginBottom: 16 },
-  label: { display: 'block', fontSize: 13, fontWeight: 500, color: '#475569', marginBottom: 6 },
-  input: { width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 14, outline: 'none', boxSizing: 'border-box' },
-  downloadBlock: { background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 10, padding: '16px', marginBottom: 18 },
-  downloadLabel: { fontSize: 13, fontWeight: 600, color: '#0369a1', marginBottom: 10 },
-  downloadBtn: { display: 'inline-block', background: '#0284c7', color: '#fff', textDecoration: 'none', padding: '10px 16px', borderRadius: 8, fontSize: 14, fontWeight: 600 },
-  downloadHint: { fontSize: 12, color: '#64748b', marginTop: 10 },
-  dropzone: { border: '2px dashed #cbd5e1', borderRadius: 10, padding: '36px 20px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.15s', marginBottom: 12 },
-  dropzoneOver: { borderColor: '#3b82f6', background: '#eff6ff' },
-  dropzoneUploading: { opacity: 0.6, cursor: 'default' },
-  uploadIcon: { marginBottom: 10, display: 'flex', justifyContent: 'center' },
-  dropText: { fontSize: 15, fontWeight: 600, color: '#334155', marginBottom: 4 },
-  dropSub: { fontSize: 12, color: '#94a3b8' },
-  errorBox: { background: '#fef2f2', color: '#dc2626', padding: '8px 12px', borderRadius: 6, fontSize: 13, marginBottom: 12 },
-  instructions: { background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '14px 16px' },
-  instTitle: { fontSize: 13, fontWeight: 600, color: '#475569', marginBottom: 6 },
-  instList: { paddingLeft: 18, color: '#64748b', fontSize: 13, lineHeight: 2, margin: 0 },
+  page: { minHeight: '100vh', background: '#f8fafc', padding: '28px 20px', display: 'flex', justifyContent: 'center' },
+  card: { background: '#fff', borderRadius: 12, width: '100%', maxWidth: 960, boxShadow: '0 4px 24px rgba(0,0,0,0.08)', overflow: 'hidden' },
+  header: { display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', background: '#0f172a', color: '#fff' },
+  logoMark: { width: 34, height: 34, background: '#fff', color: '#0f172a', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800 },
+  company: { fontSize: 15, fontWeight: 700 },
+  sub: { fontSize: 12, color: '#94a3b8', marginTop: 1 },
+  sealed: { fontSize: 12, background: '#064e3b', color: '#6ee7b7', padding: '5px 12px', borderRadius: 20, whiteSpace: 'nowrap' },
+  instructions: { fontSize: 13, color: '#475569', padding: '14px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', lineHeight: 1.5 },
+  tableWrap: { overflowX: 'auto' },
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
+  th: { padding: '10px 12px', textAlign: 'left', background: '#f8fafc', fontWeight: 700, color: '#64748b', borderBottom: '1px solid #e2e8f0', textTransform: 'uppercase', fontSize: 10.5, letterSpacing: '.04em', whiteSpace: 'nowrap' },
+  row: { borderBottom: '1px solid #f1f5f9', transition: 'opacity .15s' },
+  td: { padding: '10px 12px', color: '#334155', verticalAlign: 'middle' },
+  thumb: { width: 60, height: 52, objectFit: 'contain', borderRadius: 6, border: '1px solid #e2e8f0', background: '#f8fafc' },
+  itemDesc: { fontSize: 11, color: '#64748b', marginTop: 2, maxWidth: 320 },
+  dollar: { color: '#94a3b8', marginRight: 3 },
+  inp: { width: 84, padding: '7px 9px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, outline: 'none' },
+  errorBox: { background: '#fef2f2', color: '#dc2626', padding: '8px 12px', margin: '0 20px', borderRadius: 6, fontSize: 13 },
+  footer: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', gap: 12, flexWrap: 'wrap' },
+  submitBtn: { background: '#0284c7', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 22px', fontSize: 14, fontWeight: 700, cursor: 'pointer' },
 };

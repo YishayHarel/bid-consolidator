@@ -123,6 +123,99 @@ router.get('/open-projects', (req, res) => {
   res.json([]);
 });
 
+// ---- Inline quoting dashboard (token-gated, sealed per factory) ------------
+
+// Load a token, returning the row or null. Also checks usable state.
+async function loadUsableToken(token) {
+  const { rows } = await pool.query(
+    `SELECT vt.*, p.name AS project_name, p.division
+     FROM vendor_tokens vt JOIN projects p ON p.id = vt.project_id
+     WHERE vt.token=$1`,
+    [token]
+  );
+  return rows[0] || null;
+}
+
+// GET the project's items plus THIS factory's own saved quotes (never others').
+router.get('/items/:token', async (req, res) => {
+  try {
+    const t = await loadUsableToken(req.params.token);
+    if (!t) return res.status(404).json({ status: 'invalid' });
+    if (t.used_at) return res.json({ status: 'used', factory_name: t.factory_name });
+    if (new Date(t.expires_at) < new Date()) return res.json({ status: 'expired' });
+
+    const { rows: items } = await pool.query(
+      `SELECT item_index, style_num, description, moq AS target_moq
+       FROM project_items WHERE project_id=$1 ORDER BY item_index`,
+      [t.project_id]
+    );
+    const { rows: quotes } = await pool.query(
+      `SELECT item_index, price, moq, lead_time FROM quotes WHERE project_id=$1 AND factory_name=$2`,
+      [t.project_id, t.factory_name]
+    );
+    const qByItem = {};
+    quotes.forEach(q => { qByItem[q.item_index] = q; });
+
+    res.json({
+      status: 'valid',
+      factory_name: t.factory_name,
+      project_id: t.project_id,
+      project_name: t.project_name,
+      items: items.map(it => ({ ...it, quote: qByItem[it.item_index] || null })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Autosave one item's quote (or clear it when the factory un-bids the item).
+router.post('/quote-item/:token', async (req, res) => {
+  const { item_index, bidding, price, moq, lead_time, style_num, description } = req.body;
+  if (item_index == null) return res.status(400).json({ error: 'item_index required' });
+  try {
+    const t = await loadUsableToken(req.params.token);
+    if (!t) return res.status(404).json({ error: 'Invalid link' });
+    if (t.used_at) return res.status(400).json({ error: 'This quote has already been submitted' });
+    if (new Date(t.expires_at) < new Date()) return res.status(400).json({ error: 'This link has expired' });
+
+    await pool.query(
+      'DELETE FROM quotes WHERE project_id=$1 AND factory_name=$2 AND item_index=$3',
+      [t.project_id, t.factory_name, item_index]
+    );
+    if (bidding) {
+      await pool.query(
+        `INSERT INTO quotes (project_id, factory_name, item_index, style_num, description, moq, price, lead_time)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [t.project_id, t.factory_name, item_index, style_num || null, description || null,
+         moq ? parseInt(moq) : null, (price !== '' && price != null) ? price : null, lead_time || null]
+      );
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save' });
+  }
+});
+
+// Finalize: mark the link used, stamp the factory as submitted, notify the buyer.
+router.post('/submit-quotes/:token', async (req, res) => {
+  try {
+    const t = await loadUsableToken(req.params.token);
+    if (!t) return res.status(404).json({ error: 'Invalid link' });
+    if (t.used_at) return res.status(400).json({ error: 'This quote has already been submitted' });
+    if (new Date(t.expires_at) < new Date()) return res.status(400).json({ error: 'This link has expired' });
+
+    await pool.query('UPDATE vendor_tokens SET used_at=NOW() WHERE token=$1', [req.params.token]);
+    await pool.query('UPDATE project_factories SET submitted_at=NOW() WHERE project_id=$1 AND factory_name=$2', [t.project_id, t.factory_name]);
+    if (req.app.locals.broadcast) req.app.locals.broadcast({ type: 'quote:new', factory_name: t.factory_name, project_name: t.project_name });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to submit' });
+  }
+});
+
 // Public: token upload
 router.post('/submit/:token', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
