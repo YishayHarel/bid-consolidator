@@ -93,26 +93,48 @@ router.post('/', requireAuth, async (req, res) => {
 
 // ---- CAD-driven project builder --------------------------------------------
 
-// Upload one or more CAD/design files (images or PDF) to a project.
-router.post('/:id/cads', requireAuth, ownProject, cadUpload.array('files', 30), async (req, res) => {
+// Upload one or more CAD/design files (images or PDF). Each file also becomes an
+// item automatically (named from the filename), so a whole batch of designs turns
+// into an item list in one shot. Add extra items manually if a CAD needs several.
+router.post('/:id/cads', requireAuth, ownProject, cadUpload.array('files', 100), async (req, res) => {
   if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
   try {
     const { rows: proj } = await pool.query('SELECT name FROM projects WHERE id=$1', [req.params.id]);
     const cleanName = (proj[0]?.name || 'project').replace(/[^a-zA-Z0-9-]/g, '_');
-    const out = [];
+    const { rows: mx } = await pool.query('SELECT COALESCE(MAX(item_index),-1)+1 AS next FROM project_items WHERE project_id=$1', [req.params.id]);
+    let itemIndex = mx[0].next;
+
+    const cads = [];
+    const items = [];
     for (const f of req.files) {
       const ext = path.extname(f.originalname);
       const key = `${cleanName}/cads/${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
       await saveObject(key, fs.readFileSync(f.path), contentTypeFor(ext));
       fs.unlink(f.path, () => {});
-      const { rows } = await pool.query(
+      const { rows: cadRows } = await pool.query(
         `INSERT INTO project_cads (project_id, file_path, original_name, content_type)
          VALUES ($1,$2,$3,$4) RETURNING *`,
         [req.params.id, key, f.originalname, contentTypeFor(ext)]
       );
-      out.push(rows[0]);
+      const cad = cadRows[0];
+      cads.push(cad);
+
+      // Auto-create one item per uploaded design, named from the filename.
+      const itemName = path.basename(f.originalname, ext).replace(/[_]+/g, ' ').trim();
+      const { rows: itemRows } = await pool.query(
+        `INSERT INTO project_items (project_id, item_index, style_num, cad_id, image_path)
+         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+        [req.params.id, itemIndex, itemName || `Item ${itemIndex + 1}`, cad.id, key]
+      );
+      await pool.query(
+        `INSERT INTO project_item_images (project_id, item_index, position, image_path)
+         VALUES ($1,$2,0,$3) ON CONFLICT (project_id, item_index, position) DO UPDATE SET image_path=EXCLUDED.image_path`,
+        [req.params.id, itemIndex, key]
+      );
+      items.push(itemRows[0]);
+      itemIndex++;
     }
-    res.status(201).json(out);
+    res.status(201).json({ cads, items });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to upload CADs' });

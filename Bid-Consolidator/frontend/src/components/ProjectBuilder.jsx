@@ -33,8 +33,8 @@ export default function ProjectBuilder({ projectId }) {
     const fd = new FormData();
     [...files].forEach(f => fd.append('files', f));
     try {
-      const { data } = await api.post(`/projects/${projectId}/cads`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      setCads(cs => [...cs, ...data]);
+      await api.post(`/projects/${projectId}/cads`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await load(); // each uploaded CAD becomes an item — refresh both lists
     } catch (err) {
       alert(err.response?.data?.error || 'Upload failed');
     }
@@ -105,7 +105,7 @@ export default function ProjectBuilder({ projectId }) {
           onChange={e => uploadCads(e.target.files)} />
       </div>
       {loading ? <div style={s.muted}>Loading…</div> : cads.length === 0 ? (
-        <div style={s.emptyBox}>Upload design files (images or PDF). Then build items from them below — one file can back several items.</div>
+        <div style={s.emptyBox}>Select all your design files at once (images or PDF) — each one becomes an item automatically below, named from its filename. Add extra items manually if a single CAD needs several.</div>
       ) : (
         <div style={s.cadGrid}>
           {cads.map(c => (
