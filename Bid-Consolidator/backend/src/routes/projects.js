@@ -35,6 +35,16 @@ const templateUpload = multer({
   },
 });
 
+// CAD / design files that seed a project's items (images or PDF).
+const cadUpload = multer({
+  dest: tmpDir,
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = /\.(png|jpe?g|gif|webp|pdf)$/i.test(file.originalname);
+    cb(ok ? null : new Error('Only images or PDF files allowed'), ok);
+  },
+});
+
 // Ownership guard for any authenticated /:id route: the project must exist AND
 // belong to the logged-in user. Returns 404 (not 403) so we don't leak that a
 // project id exists for someone else. Runs after requireAuth (needs req.user).
@@ -135,6 +145,126 @@ router.post('/', requireAuth, templateUpload.single('templateFile'), async (req,
     console.error(err);
     res.status(500).json({ error: 'Server error' });
   }
+});
+
+// ---- CAD-driven project builder --------------------------------------------
+
+// Upload one or more CAD/design files (images or PDF) to a project.
+router.post('/:id/cads', requireAuth, ownProject, cadUpload.array('files', 30), async (req, res) => {
+  if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
+  try {
+    const { rows: proj } = await pool.query('SELECT name FROM projects WHERE id=$1', [req.params.id]);
+    const cleanName = (proj[0]?.name || 'project').replace(/[^a-zA-Z0-9-]/g, '_');
+    const out = [];
+    for (const f of req.files) {
+      const ext = path.extname(f.originalname);
+      const key = `${cleanName}/cads/${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+      await saveObject(key, fs.readFileSync(f.path), contentTypeFor(ext));
+      fs.unlink(f.path, () => {});
+      const { rows } = await pool.query(
+        `INSERT INTO project_cads (project_id, file_path, original_name, content_type)
+         VALUES ($1,$2,$3,$4) RETURNING *`,
+        [req.params.id, key, f.originalname, contentTypeFor(ext)]
+      );
+      out.push(rows[0]);
+    }
+    res.status(201).json(out);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to upload CADs' });
+  }
+});
+
+// List a project's CAD files.
+router.get('/:id/cads', requireAuth, ownProject, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, original_name, content_type, created_at FROM project_cads WHERE project_id=$1 ORDER BY id',
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch { res.status(500).json({ error: 'Server error' }); }
+});
+
+// Delete a CAD (items referencing it keep their mirrored image; cad_id is nulled).
+router.delete('/:id/cads/:cadId', requireAuth, ownProject, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM project_cads WHERE id=$1 AND project_id=$2', [req.params.cadId, req.params.id]);
+    res.json({ success: true });
+  } catch { res.status(500).json({ error: 'Server error' }); }
+});
+
+// Serve a CAD file (public — consumed via <img>/<embed> which can't send auth).
+router.get('/:id/cad/:cadId', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT file_path FROM project_cads WHERE id=$1 AND project_id=$2',
+      [req.params.cadId, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    return serveStored(res, rows[0].file_path);
+  } catch { res.status(500).json({ error: 'Server error' }); }
+});
+
+// List a project's items (for the builder), with their linked CAD.
+router.get('/:id/items', requireAuth, ownProject, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT pi.item_index, pi.style_num, pi.description, pi.moq, pi.last_price, pi.cad_id,
+              c.original_name AS cad_name, c.content_type AS cad_type
+       FROM project_items pi
+       LEFT JOIN project_cads c ON c.id = pi.cad_id
+       WHERE pi.project_id=$1
+       ORDER BY pi.item_index`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch { res.status(500).json({ error: 'Server error' }); }
+});
+
+// Mirror a CAD image into the item's reference-image slot so Compare/portal show it.
+async function mirrorCadImage(projectId, itemIndex, cadId) {
+  await pool.query('DELETE FROM project_item_images WHERE project_id=$1 AND item_index=$2', [projectId, itemIndex]);
+  if (!cadId) { await pool.query('UPDATE project_items SET image_path=NULL WHERE project_id=$1 AND item_index=$2', [projectId, itemIndex]); return; }
+  const { rows } = await pool.query('SELECT file_path FROM project_cads WHERE id=$1 AND project_id=$2', [cadId, projectId]);
+  const key = rows[0]?.file_path || null;
+  await pool.query('UPDATE project_items SET image_path=$1 WHERE project_id=$2 AND item_index=$3', [key, projectId, itemIndex]);
+  if (key) {
+    await pool.query(
+      `INSERT INTO project_item_images (project_id, item_index, position, image_path)
+       VALUES ($1,$2,0,$3) ON CONFLICT (project_id, item_index, position) DO UPDATE SET image_path=EXCLUDED.image_path`,
+      [projectId, itemIndex, key]
+    );
+  }
+}
+
+// Create an item on a project (name, specs, target price, MOQ, linked CAD).
+router.post('/:id/items', requireAuth, ownProject, async (req, res) => {
+  const { style_num, description, moq, last_price, cad_id } = req.body;
+  try {
+    const { rows: mx } = await pool.query('SELECT COALESCE(MAX(item_index),-1)+1 AS next FROM project_items WHERE project_id=$1', [req.params.id]);
+    const itemIndex = mx[0].next;
+    const { rows } = await pool.query(
+      `INSERT INTO project_items (project_id, item_index, style_num, description, moq, last_price, cad_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [req.params.id, itemIndex, style_num || null, description || null,
+       moq ? parseInt(moq) : null, (last_price !== '' && last_price != null) ? last_price : null, cad_id || null]
+    );
+    await mirrorCadImage(req.params.id, itemIndex, cad_id || null);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create item' });
+  }
+});
+
+// Delete an item and its reference images.
+router.delete('/:id/items/:itemIndex', requireAuth, ownProject, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM project_item_images WHERE project_id=$1 AND item_index=$2', [req.params.id, req.params.itemIndex]);
+    await pool.query('DELETE FROM project_items WHERE project_id=$1 AND item_index=$2', [req.params.id, req.params.itemIndex]);
+    res.json({ success: true });
+  } catch { res.status(500).json({ error: 'Server error' }); }
 });
 
 // Update project
@@ -281,19 +411,33 @@ router.get('/:id/quotes', requireAuth, ownProject, async (req, res) => {
   }
 });
 
-// Update an outbound item's fields (currently just the manual Last Price).
-// Upsert so it works even for projects with no template row yet.
+// Update an item's fields. Only fields present in the body change, so it serves
+// both the Compare tab (last_price only) and the CAD builder (name/specs/moq/cad).
 router.patch('/:id/items/:itemIndex', requireAuth, ownProject, async (req, res) => {
-  const { last_price } = req.body;
-  const value = last_price != null && last_price !== '' ? last_price : null;
+  const b = req.body;
+  const has = (k) => Object.prototype.hasOwnProperty.call(b, k);
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO project_items (project_id, item_index, last_price)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (project_id, item_index) DO UPDATE SET last_price = EXCLUDED.last_price
-       RETURNING *`,
-      [req.params.id, req.params.itemIndex, value]
+    await pool.query(
+      `INSERT INTO project_items (project_id, item_index) VALUES ($1,$2)
+       ON CONFLICT (project_id, item_index) DO NOTHING`,
+      [req.params.id, req.params.itemIndex]
     );
+    const { rows } = await pool.query(
+      `UPDATE project_items SET
+         style_num   = CASE WHEN $3  THEN $4  ELSE style_num  END,
+         description = CASE WHEN $5  THEN $6  ELSE description END,
+         moq         = CASE WHEN $7  THEN $8  ELSE moq        END,
+         last_price  = CASE WHEN $9  THEN $10 ELSE last_price END,
+         cad_id      = CASE WHEN $11 THEN $12 ELSE cad_id     END
+       WHERE project_id=$1 AND item_index=$2 RETURNING *`,
+      [req.params.id, req.params.itemIndex,
+       has('style_num'), b.style_num ?? null,
+       has('description'), b.description ?? null,
+       has('moq'), has('moq') ? (b.moq ? parseInt(b.moq) : null) : null,
+       has('last_price'), (b.last_price !== '' && b.last_price != null) ? b.last_price : null,
+       has('cad_id'), b.cad_id ?? null]
+    );
+    if (has('cad_id')) await mirrorCadImage(req.params.id, req.params.itemIndex, b.cad_id || null);
     res.json(rows[0]);
   } catch (err) {
     console.error(err);

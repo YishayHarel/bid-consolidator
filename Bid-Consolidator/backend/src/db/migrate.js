@@ -177,6 +177,22 @@ async function migrate() {
     await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS last_price NUMERIC(10,4);`);
     await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS moq INTEGER;`);
 
+    // CAD-driven projects: division heads attach design files (images/PDF), then
+    // build items that reference them (one CAD can back several items).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS project_cads (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        file_path VARCHAR(512) NOT NULL,
+        original_name VARCHAR(512),
+        content_type VARCHAR(255),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS cad_id INTEGER REFERENCES project_cads(id) ON DELETE SET NULL;`);
+    // Factories now quote lead time per item (inline dashboard).
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS lead_time VARCHAR(100);`);
+
     // Pre-existing bug: deleting an invited factory 500'd whenever it had an
     // auto-generated vendor token, since this FK had no ON DELETE behavior.
     await client.query(`ALTER TABLE vendor_tokens DROP CONSTRAINT IF EXISTS vendor_tokens_project_factory_id_fkey;`);

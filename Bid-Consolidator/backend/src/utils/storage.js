@@ -71,6 +71,8 @@ function contentTypeFor(ext) {
   if (e === 'jpg' || e === 'jpeg') return 'image/jpeg';
   if (e === 'png') return 'image/png';
   if (e === 'gif') return 'image/gif';
+  if (e === 'webp') return 'image/webp';
+  if (e === 'pdf') return 'application/pdf';
   if (e === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   if (e === 'xls') return 'application/vnd.ms-excel';
   return 'application/octet-stream';

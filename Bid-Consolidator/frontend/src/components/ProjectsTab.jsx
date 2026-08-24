@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../utils/api';
+import ProjectBuilder from './ProjectBuilder';
 
 const DIVISIONS = ['Hydration', 'Pet Beauty', 'Hard Coolers', 'Soft Coolers', 'Kitchen', 'General'];
 
@@ -162,10 +163,9 @@ export default function ProjectsTab() {
               </datalist>
             </div>
             <div style={s.field}>
-              <label style={s.label}>Outbound File — sent to factories (Optional)</label>
-              <input style={s.input} type="file" accept=".xlsx,.xls"
-                onChange={e => setForm(f => ({ ...f, templateFile: e.target.files[0] }))} />
-              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>The Excel with your product list + photos. We attach it to the invite email and use its photos as your "Our Image" reference column.</div>
+              <div style={{ fontSize: 12, color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
+                After creating the project, open it to <strong>upload design files (CADs)</strong> and build your item list from them.
+              </div>
             </div>
           </div>
           <button style={s.saveBtn} disabled={saving}>{saving ? 'Creating...' : 'Create Project'}</button>
@@ -180,6 +180,8 @@ export default function ProjectsTab() {
             .map(p => (
               <div key={p.id}>
                 <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 20 }}>{p.name}</h3>
+
+                <ProjectBuilder projectId={p.id} />
 
                 <div style={s.factoriesSection}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
