@@ -23,12 +23,13 @@ const PROMPT = `You are reading a product line-sheet / CAD spec page for a consu
 Identify each DISTINCT physical product shown on this page (a page may show one product, or several products laid out in a grid).
 For EACH product return:
 - "name": its style number or label exactly as printed if visible (e.g. "FB974459A", "PY975364", "BAG A"); if there is no code, a short 2-4 word description.
+- "specs": a concise one-line summary of that product's key specs shown on the sheet — include whatever is present: size/dimensions, material or GSM, pack/count, finish (e.g. powder-coated, foil, glitter), packaging. Keep under ~140 chars. Empty string if none are shown.
 - "box": the bounding box around that product's artwork and its label, as [ymin, xmin, ymax, xmax], each an integer 0-1000 normalized to the image.
 Rules:
 - Treat each separately-labeled product as its own entry (e.g. "STYLE #: X" and "STYLE #: Y" are two products; "BAG A".."BAG F" are six).
 - If the page clearly shows just ONE product, return exactly one entry whose box covers the main artwork.
-- Ignore the company logo, spec tables, packaging call-outs, and footers when drawing boxes.
-Return ONLY JSON: {"products":[{"name":"...","box":[ymin,xmin,ymax,xmax]}]}`;
+- Ignore the company logo when drawing boxes; but DO read spec tables/call-outs to fill "specs".
+Return ONLY JSON: {"products":[{"name":"...","specs":"...","box":[ymin,xmin,ymax,xmax]}]}`;
 
 // Ask Gemini for the products on one page image (PNG buffer). Retries a few
 // times on transient overload (429/503) with backoff.
@@ -61,7 +62,12 @@ async function detectProducts(pngBuffer) {
   try { parsed = JSON.parse(resp.text); } catch { return []; }
   const products = Array.isArray(parsed?.products) ? parsed.products : [];
   return products
-    .map(p => ({ name: String(p.name || '').trim(), box: p.box }))
+    .map(p => ({
+      // Strip a leading "STYLE #:" / "STYLE#" style label for a clean name.
+      name: String(p.name || '').replace(/^\s*style\s*#?\s*:?\s*/i, '').trim(),
+      specs: String(p.specs || '').trim(),
+      box: p.box,
+    }))
     .filter(p => Array.isArray(p.box) && p.box.length === 4 && p.box.every(n => typeof n === 'number'));
 }
 

@@ -420,9 +420,9 @@ router.post('/:id/detect-items', requireAuth, ownProject, async (req, res) => {
           const fallbackName = (cad.original_name || 'Item').replace(/\.[^.]+$/, '');
           const name = prod.name || `${fallbackName} ${itemIndex + 1}`;
           const { rows: itRows } = await pool.query(
-            `INSERT INTO project_items (project_id, item_index, style_num, cad_id, image_path)
-             VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-            [req.params.id, itemIndex, name, cad.id, key]
+            `INSERT INTO project_items (project_id, item_index, style_num, description, cad_id, image_path)
+             VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+            [req.params.id, itemIndex, name, prod.specs || null, cad.id, key]
           );
           await pool.query(
             `INSERT INTO project_item_images (project_id, item_index, position, image_path)
