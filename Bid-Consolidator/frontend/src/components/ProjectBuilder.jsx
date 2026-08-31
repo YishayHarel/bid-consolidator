@@ -11,7 +11,9 @@ export default function ProjectBuilder({ projectId }) {
   const [detecting, setDetecting] = useState(false);
   const [form, setForm] = useState({ style_num: '', description: '', moq: '', last_price: '', cad_id: '' });
   const [adding, setAdding] = useState(false);
+  const [importingExcel, setImportingExcel] = useState(false);
   const fileRef = useRef();
+  const excelRef = useRef();
 
   useEffect(() => { load(); }, [projectId]);
 
@@ -42,6 +44,22 @@ export default function ProjectBuilder({ projectId }) {
     }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = '';
+  }
+
+  // Import items from a structured Excel sheet (classic outbound format).
+  async function uploadExcel(files) {
+    if (!files || !files.length) return;
+    setImportingExcel(true);
+    const fd = new FormData();
+    fd.append('file', files[0]);
+    try {
+      await api.post(`/projects/${projectId}/items-from-excel`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Excel import failed');
+    }
+    setImportingExcel(false);
+    if (excelRef.current) excelRef.current.value = '';
   }
 
   // Run the AI pass that reads each CAD and creates an item per detected product.
@@ -121,14 +139,19 @@ export default function ProjectBuilder({ projectId }) {
           <button style={s.addBtn2} onClick={() => fileRef.current?.click()} disabled={uploading || detecting}>
             {uploading ? 'Uploading…' : '+ Upload CADs'}
           </button>
+          <button style={s.excelBtn} onClick={() => excelRef.current?.click()} disabled={importingExcel || uploading}>
+            {importingExcel ? 'Importing…' : '+ Import Excel'}
+          </button>
         </div>
         <input ref={fileRef} type="file" multiple
           accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.svg,.pdf,.ai,.eps,.psd,image/*"
           style={{ display: 'none' }} onChange={e => uploadCads(e.target.files)} />
+        <input ref={excelRef} type="file" accept=".xlsx,.xls"
+          style={{ display: 'none' }} onChange={e => uploadExcel(e.target.files)} />
       </div>
       {detecting && <div style={s.aiBanner}>✨ Reading your designs and splitting them into items — this can take a moment per page…</div>}
       {loading ? <div style={s.muted}>Loading…</div> : cads.length === 0 ? (
-        <div style={s.emptyBox}>Select all your design files at once (images or PDF). AI reads each one and splits it into items automatically — even when one sheet has several products. Everything lands in the table below to review and edit.</div>
+        <div style={s.emptyBox}>Two ways to build the item list: <strong>Upload CADs</strong> (images/PDF — AI reads each and splits it into items, even several products on one sheet), or <strong>Import Excel</strong> (a structured sheet with one item per row + photos, like the classic outbound file). Everything lands in the table below to review and edit.</div>
       ) : (
         <div style={s.cadGrid}>
           {cads.map(c => (
@@ -231,6 +254,7 @@ const s = {
   addBtn: { marginLeft: 'auto', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
   addBtn2: { background: '#0f172a', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
   aiBtn: { background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  excelBtn: { background: '#047857', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
   aiBanner: { background: '#eef2ff', border: '1px solid #c7d2fe', color: '#3730a3', borderRadius: 8, padding: '10px 14px', fontSize: 13, marginBottom: 12 },
   cadGrid: { display: 'flex', flexWrap: 'wrap', gap: 12 },
   cadCard: { width: 110, border: '1px solid #e2e8f0', borderRadius: 8, padding: 8, position: 'relative', textAlign: 'center' },

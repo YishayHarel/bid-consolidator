@@ -379,6 +379,53 @@ router.delete('/:id/factories/:fid', requireAuth, ownProject, async (req, res) =
   }
 });
 
+// Import items from a structured Excel sheet (the classic outbound format):
+// one item per row, with Style #, description/specs, MOQ, and embedded photos.
+// Appends to whatever items the project already has (CAD-built or not).
+router.post('/:id/items-from-excel', requireAuth, ownProject, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const { rows: proj } = await pool.query('SELECT name FROM projects WHERE id=$1', [req.params.id]);
+    const cleanName = (proj[0]?.name || 'project').replace(/[^a-zA-Z0-9-]/g, '_');
+    const { rows: mx } = await pool.query('SELECT COALESCE(MAX(item_index),-1)+1 AS next FROM project_items WHERE project_id=$1', [req.params.id]);
+    const base = mx[0].next;
+
+    const { quotes: items } = parseQuoteExcel(req.file.path);
+    const imagesByRow = extractImagesByRow(req.file.path);
+    const created = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const itemIndex = base + i;
+      const photos = imagesByRow[it.excel_row] || [];
+      const keys = [];
+      for (let p = 0; p < photos.length; p++) {
+        const key = `${cleanName}/excel/images/item${itemIndex}-${p}.${photos[p].ext}`;
+        await saveObject(key, photos[p].data, contentTypeFor(photos[p].ext));
+        keys.push(key);
+      }
+      const { rows: itRows } = await pool.query(
+        `INSERT INTO project_items (project_id, item_index, style_num, description, moq, image_path)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [req.params.id, itemIndex, it.style_num || null, it.description || null, it.moq || null, keys[0] || null]
+      );
+      for (let p = 0; p < keys.length; p++) {
+        await pool.query(
+          `INSERT INTO project_item_images (project_id, item_index, position, image_path)
+           VALUES ($1,$2,$3,$4) ON CONFLICT (project_id, item_index, position) DO NOTHING`,
+          [req.params.id, itemIndex, p, keys[p]]
+        );
+      }
+      created.push(itRows[0]);
+    }
+    fs.unlink(req.file.path, () => {});
+    res.status(201).json({ created: created.length, items: created });
+  } catch (err) {
+    console.error(err);
+    fs.unlink(req.file.path, () => {});
+    res.status(500).json({ error: 'Failed to import Excel' });
+  }
+});
+
 // AI: scan the project's not-yet-processed CADs, detect each product on each
 // page, and create one item per product (cropped to that product). Idempotent —
 // only processes CADs that don't have items yet. Returns what it created.
