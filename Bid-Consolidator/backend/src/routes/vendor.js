@@ -145,7 +145,7 @@ router.get('/items/:token', async (req, res) => {
     if (new Date(t.expires_at) < new Date()) return res.json({ status: 'expired' });
 
     const { rows: items } = await pool.query(
-      `SELECT item_index, style_num, description, moq AS target_moq
+      `SELECT item_index, style_num, description, moq AS target_moq, inner_pack, master_pack
        FROM project_items WHERE project_id=$1 ORDER BY item_index`,
       [t.project_id]
     );

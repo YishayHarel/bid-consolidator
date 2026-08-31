@@ -190,6 +190,9 @@ async function migrate() {
       );
     `);
     await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS cad_id INTEGER REFERENCES project_cads(id) ON DELETE SET NULL;`);
+    // Inner/master pack quantities — keyed in by the project creator (not on the CAD).
+    await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS inner_pack INTEGER;`);
+    await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS master_pack INTEGER;`);
     // Factories now quote lead time per item (inline dashboard).
     await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS lead_time VARCHAR(100);`);
 

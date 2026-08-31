@@ -14,17 +14,19 @@ const FACTORY_TINTS = {
 
 const tintKeys = Object.keys(FACTORY_TINTS);
 
-export default function ComparisonItemView({ projectId, itemIndex, styleNum, description, imageCount = 0, lastPrice, moq }) {
+export default function ComparisonItemView({ projectId, itemIndex, styleNum, description, imageCount = 0, lastPrice, moq, innerPack, masterPack }) {
   const [quotes, setQuotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingNotes, setEditingNotes] = useState({});
   const [saving, setSaving] = useState({});
   const [lastPriceVal, setLastPriceVal] = useState(lastPrice ?? '');
+  const [innerVal, setInnerVal] = useState(innerPack ?? '');
+  const [masterVal, setMasterVal] = useState(masterPack ?? '');
   const [descExpanded, setDescExpanded] = useState(false);
 
-  useEffect(() => {
-    setLastPriceVal(lastPrice ?? '');
-  }, [lastPrice]);
+  useEffect(() => { setLastPriceVal(lastPrice ?? ''); }, [lastPrice]);
+  useEffect(() => { setInnerVal(innerPack ?? ''); }, [innerPack]);
+  useEffect(() => { setMasterVal(masterPack ?? ''); }, [masterPack]);
 
   useEffect(() => {
     api.get(`/projects/${projectId}/comparison/${itemIndex}`)
@@ -74,6 +76,14 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
     }
   }
 
+  async function saveItemField(field, value) {
+    try {
+      await api.patch(`/projects/${projectId}/items/${itemIndex}`, { [field]: value === '' ? null : parseInt(value) });
+    } catch (err) {
+      console.error(field + ' save failed:', err);
+    }
+  }
+
   const ourImageCols = Array.from({ length: imageCount || 0 }, (_, k) => k);
 
   // Description is clipped to one line by default; click toggles it to wrap
@@ -107,6 +117,8 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
               {ourImageCols.map(k => <th key={k} style={s.th}>Our Image #{k + 1}</th>)}
               <th style={s.th}>Description</th>
               <th style={s.th}>Last Price</th>
+              <th style={s.th}>Inner #</th>
+              <th style={s.th}>Master #</th>
               <th style={s.th}>Their Image</th>
               <th style={s.th}>MOQ</th>
               <th style={s.th}>Price</th>
@@ -129,6 +141,14 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
                 <td style={s.priceTd}>
                   <input type="number" step="0.01" placeholder="—" value={lastPriceVal}
                     onChange={(e) => setLastPriceVal(e.target.value)} onBlur={saveLastPrice} style={s.lastPriceInput} />
+                </td>
+                <td style={s.priceTd}>
+                  <input type="number" placeholder="—" value={innerVal}
+                    onChange={(e) => setInnerVal(e.target.value)} onBlur={() => saveItemField('inner_pack', innerVal)} style={s.lastPriceInput} />
+                </td>
+                <td style={s.priceTd}>
+                  <input type="number" placeholder="—" value={masterVal}
+                    onChange={(e) => setMasterVal(e.target.value)} onBlur={() => saveItemField('master_pack', masterVal)} style={s.lastPriceInput} />
                 </td>
                 <td style={s.imageTd}><div style={s.imagePlaceholder}>—</div></td>
                 <td style={s.td}>{moq != null ? Number(moq).toLocaleString() : '—'}</td>
@@ -167,6 +187,14 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
                       onBlur={saveLastPrice}
                       style={s.lastPriceInput}
                     />
+                  </td>
+                  <td style={s.priceTd}>
+                    <input type="number" placeholder="—" value={innerVal}
+                      onChange={(e) => setInnerVal(e.target.value)} onBlur={() => saveItemField('inner_pack', innerVal)} style={s.lastPriceInput} />
+                  </td>
+                  <td style={s.priceTd}>
+                    <input type="number" placeholder="—" value={masterVal}
+                      onChange={(e) => setMasterVal(e.target.value)} onBlur={() => saveItemField('master_pack', masterVal)} style={s.lastPriceInput} />
                   </td>
                   <td style={s.imageTd}>
                     {quote.image_path ? (

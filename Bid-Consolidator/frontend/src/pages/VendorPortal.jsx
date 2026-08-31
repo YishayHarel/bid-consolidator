@@ -122,6 +122,8 @@ export default function VendorPortal() {
                     <th style={{ ...s.th, textAlign: 'center' }}>Bid?</th>
                     <th style={s.th}>Design</th>
                     <th style={s.th}>Item</th>
+                    <th style={s.th}>Inner #</th>
+                    <th style={s.th}>Master #</th>
                     <th style={s.th}>Your FOB $</th>
                     <th style={s.th}>MOQ</th>
                     <th style={s.th}>Lead time</th>
@@ -144,6 +146,8 @@ export default function VendorPortal() {
                           <div style={{ fontWeight: 700 }}>{it.style_num || `Item ${it.item_index + 1}`}</div>
                           {it.description && <div style={s.itemDesc}>{it.description}</div>}
                         </td>
+                        <td style={s.td}>{it.inner_pack ?? '—'}</td>
+                        <td style={s.td}>{it.master_pack ?? '—'}</td>
                         <td style={s.td}>
                           <span style={s.dollar}>$</span>
                           <input type="number" step="0.01" disabled={!on} value={r.price ?? ''}

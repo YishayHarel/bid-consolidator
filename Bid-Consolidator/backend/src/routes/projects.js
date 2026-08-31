@@ -194,6 +194,7 @@ router.get('/:id/items', requireAuth, ownProject, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT pi.item_index, pi.style_num, pi.description, pi.moq, pi.last_price, pi.cad_id,
+              pi.inner_pack, pi.master_pack,
               c.original_name AS cad_name, c.content_type AS cad_type
        FROM project_items pi
        LEFT JOIN project_cads c ON c.id = pi.cad_id
@@ -468,20 +469,25 @@ router.patch('/:id/items/:itemIndex', requireAuth, ownProject, async (req, res) 
        ON CONFLICT (project_id, item_index) DO NOTHING`,
       [req.params.id, req.params.itemIndex]
     );
+    const numOrNull = (v) => (v !== '' && v != null) ? parseInt(v) : null;
     const { rows } = await pool.query(
       `UPDATE project_items SET
-         style_num   = CASE WHEN $3  THEN $4  ELSE style_num  END,
-         description = CASE WHEN $5  THEN $6  ELSE description END,
-         moq         = CASE WHEN $7  THEN $8  ELSE moq        END,
-         last_price  = CASE WHEN $9  THEN $10 ELSE last_price END,
-         cad_id      = CASE WHEN $11 THEN $12 ELSE cad_id     END
+         style_num   = CASE WHEN $3  THEN $4  ELSE style_num   END,
+         description = CASE WHEN $5  THEN $6  ELSE description  END,
+         moq         = CASE WHEN $7  THEN $8  ELSE moq         END,
+         last_price  = CASE WHEN $9  THEN $10 ELSE last_price  END,
+         cad_id      = CASE WHEN $11 THEN $12 ELSE cad_id      END,
+         inner_pack  = CASE WHEN $13 THEN $14 ELSE inner_pack  END,
+         master_pack = CASE WHEN $15 THEN $16 ELSE master_pack END
        WHERE project_id=$1 AND item_index=$2 RETURNING *`,
       [req.params.id, req.params.itemIndex,
        has('style_num'), b.style_num ?? null,
        has('description'), b.description ?? null,
-       has('moq'), has('moq') ? (b.moq ? parseInt(b.moq) : null) : null,
+       has('moq'), has('moq') ? numOrNull(b.moq) : null,
        has('last_price'), (b.last_price !== '' && b.last_price != null) ? b.last_price : null,
-       has('cad_id'), b.cad_id ?? null]
+       has('cad_id'), b.cad_id ?? null,
+       has('inner_pack'), has('inner_pack') ? numOrNull(b.inner_pack) : null,
+       has('master_pack'), has('master_pack') ? numOrNull(b.master_pack) : null]
     );
     if (has('cad_id')) await mirrorCadImage(req.params.id, req.params.itemIndex, b.cad_id || null);
     res.json(rows[0]);
@@ -516,8 +522,10 @@ router.get('/:id/styles', requireAuth, ownProject, async (req, res) => {
               COALESCE(pi.description, q.description) AS description,
               pi.last_price,
               pi.moq,
+              pi.inner_pack,
+              pi.master_pack,
               COALESCE(img.image_count, 0)::int AS image_count
-       FROM (SELECT item_index, style_num, description, last_price, moq FROM project_items WHERE project_id=$1) pi
+       FROM (SELECT item_index, style_num, description, last_price, moq, inner_pack, master_pack FROM project_items WHERE project_id=$1) pi
        FULL OUTER JOIN
             (SELECT DISTINCT ON (item_index) item_index, style_num, description
              FROM quotes WHERE project_id=$1 AND item_index IS NOT NULL

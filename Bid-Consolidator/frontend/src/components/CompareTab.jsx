@@ -69,6 +69,8 @@ export default function CompareTab() {
               imageCount={style.image_count}
               lastPrice={style.last_price}
               moq={style.moq}
+              innerPack={style.inner_pack}
+              masterPack={style.master_pack}
             />
           ))}
         </div>
