@@ -8,7 +8,8 @@ const { parseQuoteExcel } = require('../utils/parseExcel');
 const { extractImagesByRow } = require('../utils/extractImages');
 const { upsertFactory } = require('../utils/factories');
 const { resolveItemIndex } = require('../utils/matchItems');
-const { saveObject, resolveObject, removePrefix, contentTypeFor } = require('../utils/storage');
+const { saveObject, resolveObject, getObjectBuffer, removePrefix, contentTypeFor } = require('../utils/storage');
+const { aiEnabled, renderPdfToPages, detectProducts, cropBox, imageToPng } = require('../utils/cadVision');
 
 const uploadsRoot = path.join(__dirname, '../../uploads');
 
@@ -131,22 +132,26 @@ router.post('/:id/cads', requireAuth, ownProject, cadUploadMw, async (req, res) 
       const cad = cadRows[0];
       cads.push(cad);
 
-      // Auto-create one item per uploaded design, named from the filename.
-      const itemName = path.basename(f.originalname, ext).replace(/[_]+/g, ' ').trim();
-      const { rows: itemRows } = await pool.query(
-        `INSERT INTO project_items (project_id, item_index, style_num, cad_id, image_path)
-         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [req.params.id, itemIndex, itemName || `Item ${itemIndex + 1}`, cad.id, key]
-      );
-      await pool.query(
-        `INSERT INTO project_item_images (project_id, item_index, position, image_path)
-         VALUES ($1,$2,0,$3) ON CONFLICT (project_id, item_index, position) DO UPDATE SET image_path=EXCLUDED.image_path`,
-        [req.params.id, itemIndex, key]
-      );
-      items.push(itemRows[0]);
-      itemIndex++;
+      // When AI is available, items are created by the detect-items pass (which
+      // can split several products out of one CAD). Without AI, fall back to one
+      // item per file, named from the filename.
+      if (!aiEnabled()) {
+        const itemName = path.basename(f.originalname, ext).replace(/[_]+/g, ' ').trim();
+        const { rows: itemRows } = await pool.query(
+          `INSERT INTO project_items (project_id, item_index, style_num, cad_id, image_path)
+           VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+          [req.params.id, itemIndex, itemName || `Item ${itemIndex + 1}`, cad.id, key]
+        );
+        await pool.query(
+          `INSERT INTO project_item_images (project_id, item_index, position, image_path)
+           VALUES ($1,$2,0,$3) ON CONFLICT (project_id, item_index, position) DO UPDATE SET image_path=EXCLUDED.image_path`,
+          [req.params.id, itemIndex, key]
+        );
+        items.push(itemRows[0]);
+        itemIndex++;
+      }
     }
-    res.status(201).json({ cads, items });
+    res.status(201).json({ cads, items, ai: aiEnabled() });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to upload CADs' });
@@ -370,6 +375,69 @@ router.delete('/:id/factories/:fid', requireAuth, ownProject, async (req, res) =
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// AI: scan the project's not-yet-processed CADs, detect each product on each
+// page, and create one item per product (cropped to that product). Idempotent —
+// only processes CADs that don't have items yet. Returns what it created.
+router.post('/:id/detect-items', requireAuth, ownProject, async (req, res) => {
+  if (!aiEnabled()) return res.status(400).json({ error: 'AI is not configured (set GEMINI_API_KEY on the server).' });
+  try {
+    const { rows: cads } = await pool.query(
+      `SELECT * FROM project_cads
+       WHERE project_id=$1
+         AND id NOT IN (SELECT DISTINCT cad_id FROM project_items WHERE project_id=$1 AND cad_id IS NOT NULL)
+       ORDER BY id`,
+      [req.params.id]
+    );
+    if (!cads.length) return res.json({ created: 0, items: [], message: 'No new CADs to scan.' });
+
+    const { rows: proj } = await pool.query('SELECT name FROM projects WHERE id=$1', [req.params.id]);
+    const cleanName = (proj[0]?.name || 'project').replace(/[^a-zA-Z0-9-]/g, '_');
+    const { rows: mx } = await pool.query('SELECT COALESCE(MAX(item_index),-1)+1 AS next FROM project_items WHERE project_id=$1', [req.params.id]);
+    let itemIndex = mx[0].next;
+
+    const created = [];
+    for (const cad of cads) {
+      let bytes;
+      try { bytes = await getObjectBuffer(cad.file_path); } catch { continue; }
+      const isPdf = (cad.content_type || '').includes('pdf') || /\.pdf$/i.test(cad.original_name || '');
+      let pages = [];
+      try { pages = isPdf ? await renderPdfToPages(bytes) : [await imageToPng(bytes)]; }
+      catch (e) { console.error('CAD render failed:', e.message); }
+
+      for (const pageBuf of pages) {
+        let products = [];
+        try { products = await detectProducts(pageBuf); } catch (e) { console.error('detect failed:', e.message); }
+        if (!products.length) products = [{ name: '', box: null }]; // fallback: whole page = 1 item
+
+        for (const prod of products) {
+          let cropBuf = pageBuf;
+          if (prod.box) { try { cropBuf = await cropBox(pageBuf, prod.box); } catch { cropBuf = pageBuf; } }
+          const key = `${cleanName}/cads/crops/i${itemIndex}-${Date.now()}-${Math.round(Math.random() * 1e5)}.png`;
+          await saveObject(key, cropBuf, 'image/png');
+          const fallbackName = (cad.original_name || 'Item').replace(/\.[^.]+$/, '');
+          const name = prod.name || `${fallbackName} ${itemIndex + 1}`;
+          const { rows: itRows } = await pool.query(
+            `INSERT INTO project_items (project_id, item_index, style_num, cad_id, image_path)
+             VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+            [req.params.id, itemIndex, name, cad.id, key]
+          );
+          await pool.query(
+            `INSERT INTO project_item_images (project_id, item_index, position, image_path)
+             VALUES ($1,$2,0,$3) ON CONFLICT (project_id, item_index, position) DO UPDATE SET image_path=EXCLUDED.image_path`,
+            [req.params.id, itemIndex, key]
+          );
+          created.push(itRows[0]);
+          itemIndex++;
+        }
+      }
+    }
+    res.json({ created: created.length, items: created });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'AI detection failed' });
   }
 });
 

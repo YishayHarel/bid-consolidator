@@ -48,6 +48,18 @@ async function resolveObject(stored) {
   return { filePath: p };
 }
 
+// Read a stored object's raw bytes back into a Buffer (Supabase download or disk).
+async function getObjectBuffer(key) {
+  if (!key) return null;
+  if (client) {
+    const { data, error } = await client.storage.from(BUCKET).download(key);
+    if (error || !data) throw error || new Error('download failed');
+    return Buffer.from(await data.arrayBuffer());
+  }
+  const p = path.isAbsolute(key) ? key : path.join(uploadsRoot, key);
+  return fs.readFileSync(p);
+}
+
 // Delete all objects under a key prefix (best-effort; used on re-upload/cleanup).
 async function removePrefix(prefix) {
   try {
@@ -78,4 +90,4 @@ function contentTypeFor(ext) {
   return 'application/octet-stream';
 }
 
-module.exports = { saveObject, resolveObject, removePrefix, usingSupabase, contentTypeFor };
+module.exports = { saveObject, resolveObject, getObjectBuffer, removePrefix, usingSupabase, contentTypeFor };

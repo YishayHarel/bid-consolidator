@@ -8,6 +8,7 @@ export default function ProjectBuilder({ projectId }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [detecting, setDetecting] = useState(false);
   const [form, setForm] = useState({ style_num: '', description: '', moq: '', last_price: '', cad_id: '' });
   const [adding, setAdding] = useState(false);
   const fileRef = useRef();
@@ -33,13 +34,26 @@ export default function ProjectBuilder({ projectId }) {
     const fd = new FormData();
     [...files].forEach(f => fd.append('files', f));
     try {
-      await api.post(`/projects/${projectId}/cads`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      await load(); // each uploaded CAD becomes an item — refresh both lists
+      const { data } = await api.post(`/projects/${projectId}/cads`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await load();
+      if (data.ai) await detectItems(); // AI available → auto-split CADs into items
     } catch (err) {
       alert(err.response?.data?.error || 'Upload failed');
     }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = '';
+  }
+
+  // Run the AI pass that reads each CAD and creates an item per detected product.
+  async function detectItems() {
+    setDetecting(true);
+    try {
+      await api.post(`/projects/${projectId}/detect-items`);
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'AI detection failed');
+    }
+    setDetecting(false);
   }
 
   async function deleteCad(id) {
@@ -98,14 +112,23 @@ export default function ProjectBuilder({ projectId }) {
       {/* ---- Design files ---- */}
       <div style={s.sectionHead}>
         <h4 style={s.h4}>Design Files (CADs) {cads.length > 0 && <span style={s.count}>{cads.length}</span>}</h4>
-        <button style={s.addBtn} onClick={() => fileRef.current?.click()} disabled={uploading}>
-          {uploading ? 'Uploading…' : '+ Upload CADs'}
-        </button>
-        <input ref={fileRef} type="file" multiple accept="image/*,.pdf" style={{ display: 'none' }}
-          onChange={e => uploadCads(e.target.files)} />
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          {cads.length > 0 && (
+            <button style={s.aiBtn} onClick={detectItems} disabled={detecting || uploading}>
+              {detecting ? 'Analyzing…' : '✨ Detect items (AI)'}
+            </button>
+          )}
+          <button style={s.addBtn2} onClick={() => fileRef.current?.click()} disabled={uploading || detecting}>
+            {uploading ? 'Uploading…' : '+ Upload CADs'}
+          </button>
+        </div>
+        <input ref={fileRef} type="file" multiple
+          accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.svg,.pdf,.ai,.eps,.psd,image/*"
+          style={{ display: 'none' }} onChange={e => uploadCads(e.target.files)} />
       </div>
+      {detecting && <div style={s.aiBanner}>✨ Reading your designs and splitting them into items — this can take a moment per page…</div>}
       {loading ? <div style={s.muted}>Loading…</div> : cads.length === 0 ? (
-        <div style={s.emptyBox}>Select all your design files at once (images or PDF) — each one becomes an item automatically below, named from its filename. Add extra items manually if a single CAD needs several.</div>
+        <div style={s.emptyBox}>Select all your design files at once (images or PDF). AI reads each one and splits it into items automatically — even when one sheet has several products. Everything lands in the table below to review and edit.</div>
       ) : (
         <div style={s.cadGrid}>
           {cads.map(c => (
@@ -206,6 +229,9 @@ const s = {
   muted: { color: '#94a3b8', fontSize: 13, padding: 8 },
   emptyBox: { color: '#64748b', fontSize: 13, background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 8, padding: 16 },
   addBtn: { marginLeft: 'auto', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  addBtn2: { background: '#0f172a', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  aiBtn: { background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  aiBanner: { background: '#eef2ff', border: '1px solid #c7d2fe', color: '#3730a3', borderRadius: 8, padding: '10px 14px', fontSize: 13, marginBottom: 12 },
   cadGrid: { display: 'flex', flexWrap: 'wrap', gap: 12 },
   cadCard: { width: 110, border: '1px solid #e2e8f0', borderRadius: 8, padding: 8, position: 'relative', textAlign: 'center' },
   cadName: { fontSize: 10, color: '#64748b', marginTop: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
