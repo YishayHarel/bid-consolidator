@@ -11,6 +11,7 @@ export default function VendorPortal() {
   const [factory, setFactory] = useState('');
   const [projectName, setProjectName] = useState('');
   const [projectId, setProjectId] = useState(null);
+  const [division, setDivision] = useState(null);
   const [items, setItems] = useState([]);
   const [rows, setRows] = useState({});      // item_index -> { bidding, price, moq, lead_time }
   const [saving, setSaving] = useState({});   // item_index -> bool
@@ -27,6 +28,7 @@ export default function VendorPortal() {
         setFactory(data.factory_name);
         setProjectName(data.project_name);
         setProjectId(data.project_id);
+        setDivision(data.division);
         setItems(data.items);
         const init = {};
         data.items.forEach(it => {
@@ -95,6 +97,7 @@ export default function VendorPortal() {
   if (submitted) return <Screen><StatusBox color="#f0fdf4" border="#86efac" title="Quote Submitted!" message={`Thank you, ${factory}. Your pricing has been received.`} /></Screen>;
 
   const biddingCount = Object.values(rows).filter(r => r?.bidding).length;
+  const showPack = /^(gm|general)/i.test((division || '').trim()); // Inner/Master are GM-only for now
 
   return (
     <div style={s.page}>
@@ -122,8 +125,8 @@ export default function VendorPortal() {
                     <th style={{ ...s.th, textAlign: 'center' }}>Bid?</th>
                     <th style={s.th}>Design</th>
                     <th style={s.th}>Item</th>
-                    <th style={s.th}>Inner #</th>
-                    <th style={s.th}>Master #</th>
+                    {showPack && <th style={s.th}>Inner #</th>}
+                    {showPack && <th style={s.th}>Master #</th>}
                     <th style={s.th}>Your FOB $</th>
                     <th style={s.th}>MOQ</th>
                     <th style={s.th}>Lead time</th>
@@ -146,8 +149,8 @@ export default function VendorPortal() {
                           <div style={{ fontWeight: 700 }}>{it.style_num || `Item ${it.item_index + 1}`}</div>
                           {it.description && <div style={s.itemDesc}>{it.description}</div>}
                         </td>
-                        <td style={s.td}>{it.inner_pack ?? '—'}</td>
-                        <td style={s.td}>{it.master_pack ?? '—'}</td>
+                        {showPack && <td style={s.td}>{it.inner_pack ?? '—'}</td>}
+                        {showPack && <td style={s.td}>{it.master_pack ?? '—'}</td>}
                         <td style={s.td}>
                           <span style={s.dollar}>$</span>
                           <input type="number" step="0.01" disabled={!on} value={r.price ?? ''}

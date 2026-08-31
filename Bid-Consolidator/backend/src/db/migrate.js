@@ -193,6 +193,8 @@ async function migrate() {
     // Inner/master pack quantities — keyed in by the project creator (not on the CAD).
     await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS inner_pack INTEGER;`);
     await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS master_pack INTEGER;`);
+    // Soft-delete for items so an accidentally-removed row can be restored.
+    await client.query(`ALTER TABLE project_items ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;`);
     // Factories now quote lead time per item (inline dashboard).
     await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS lead_time VARCHAR(100);`);
 

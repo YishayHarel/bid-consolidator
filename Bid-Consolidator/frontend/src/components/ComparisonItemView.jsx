@@ -14,7 +14,11 @@ const FACTORY_TINTS = {
 
 const tintKeys = Object.keys(FACTORY_TINTS);
 
-export default function ComparisonItemView({ projectId, itemIndex, styleNum, description, imageCount = 0, lastPrice, moq, innerPack, masterPack }) {
+// Inner/Master pack columns are a GM-division format for now.
+const isGM = (division) => /^(gm|general)/i.test(String(division || '').trim());
+
+export default function ComparisonItemView({ projectId, itemIndex, styleNum, description, imageCount = 0, lastPrice, moq, innerPack, masterPack, division, onDeleted }) {
+  const showPack = isGM(division);
   const [quotes, setQuotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingNotes, setEditingNotes] = useState({});
@@ -84,6 +88,14 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
     }
   }
 
+  async function removeItem() {
+    if (!confirm('Remove this item? You can restore it from the "Deleted items" bar at the top.')) return;
+    try {
+      await api.delete(`/projects/${projectId}/items/${itemIndex}`);
+      onDeleted && onDeleted();
+    } catch { alert('Delete failed'); }
+  }
+
   const ourImageCols = Array.from({ length: imageCount || 0 }, (_, k) => k);
 
   // Description is clipped to one line by default; click toggles it to wrap
@@ -105,8 +117,11 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
   return (
     <div style={s.container}>
       <div style={s.productHeader}>
-        <div style={s.productTitle}>{styleNum || `Item ${itemIndex}`}</div>
-        <div style={s.productDesc}>{description}</div>
+        <div>
+          <div style={s.productTitle}>{styleNum || `Item ${itemIndex}`}</div>
+          <div style={s.productDesc}>{description}</div>
+        </div>
+        <button style={s.removeItemBtn} onClick={removeItem} title="Remove this item">✕ Remove item</button>
       </div>
 
       <div style={s.tableWrapper}>
@@ -117,8 +132,8 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
               {ourImageCols.map(k => <th key={k} style={s.th}>Our Image #{k + 1}</th>)}
               <th style={s.th}>Description</th>
               <th style={s.th}>Last Price</th>
-              <th style={s.th}>Inner #</th>
-              <th style={s.th}>Master #</th>
+              {showPack && <th style={s.th}>Inner #</th>}
+              {showPack && <th style={s.th}>Master #</th>}
               <th style={s.th}>Their Image</th>
               <th style={s.th}>MOQ</th>
               <th style={s.th}>Price</th>
@@ -142,14 +157,18 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
                   <input type="number" step="0.01" placeholder="—" value={lastPriceVal}
                     onChange={(e) => setLastPriceVal(e.target.value)} onBlur={saveLastPrice} style={s.lastPriceInput} />
                 </td>
-                <td style={s.priceTd}>
-                  <input type="number" placeholder="—" value={innerVal}
-                    onChange={(e) => setInnerVal(e.target.value)} onBlur={() => saveItemField('inner_pack', innerVal)} style={s.lastPriceInput} />
-                </td>
-                <td style={s.priceTd}>
-                  <input type="number" placeholder="—" value={masterVal}
-                    onChange={(e) => setMasterVal(e.target.value)} onBlur={() => saveItemField('master_pack', masterVal)} style={s.lastPriceInput} />
-                </td>
+                {showPack && (
+                  <>
+                    <td style={s.priceTd}>
+                      <input type="number" placeholder="—" value={innerVal}
+                        onChange={(e) => setInnerVal(e.target.value)} onBlur={() => saveItemField('inner_pack', innerVal)} style={s.lastPriceInput} />
+                    </td>
+                    <td style={s.priceTd}>
+                      <input type="number" placeholder="—" value={masterVal}
+                        onChange={(e) => setMasterVal(e.target.value)} onBlur={() => saveItemField('master_pack', masterVal)} style={s.lastPriceInput} />
+                    </td>
+                  </>
+                )}
                 <td style={s.imageTd}><div style={s.imagePlaceholder}>—</div></td>
                 <td style={s.td}>{moq != null ? Number(moq).toLocaleString() : '—'}</td>
                 <td style={s.td}>$—</td>
@@ -188,14 +207,18 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
                       style={s.lastPriceInput}
                     />
                   </td>
-                  <td style={s.priceTd}>
-                    <input type="number" placeholder="—" value={innerVal}
-                      onChange={(e) => setInnerVal(e.target.value)} onBlur={() => saveItemField('inner_pack', innerVal)} style={s.lastPriceInput} />
-                  </td>
-                  <td style={s.priceTd}>
-                    <input type="number" placeholder="—" value={masterVal}
-                      onChange={(e) => setMasterVal(e.target.value)} onBlur={() => saveItemField('master_pack', masterVal)} style={s.lastPriceInput} />
-                  </td>
+                  {showPack && (
+                    <>
+                      <td style={s.priceTd}>
+                        <input type="number" placeholder="—" value={innerVal}
+                          onChange={(e) => setInnerVal(e.target.value)} onBlur={() => saveItemField('inner_pack', innerVal)} style={s.lastPriceInput} />
+                      </td>
+                      <td style={s.priceTd}>
+                        <input type="number" placeholder="—" value={masterVal}
+                          onChange={(e) => setMasterVal(e.target.value)} onBlur={() => saveItemField('master_pack', masterVal)} style={s.lastPriceInput} />
+                      </td>
+                    </>
+                  )}
                   <td style={s.imageTd}>
                     {quote.image_path ? (
                       <img
@@ -252,7 +275,8 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
 
 const s = {
   container: { marginBottom: 32, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, overflow: 'hidden' },
-  productHeader: { background: '#f8fafc', borderBottom: '1px solid #e2e8f0', padding: '16px' },
+  productHeader: { background: '#f8fafc', borderBottom: '1px solid #e2e8f0', padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
+  removeItemBtn: { background: '#fff', border: '1px solid #fca5a5', color: '#b91c1c', borderRadius: 6, padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 },
   productTitle: { fontSize: 16, fontWeight: 700, color: '#0f172a', marginBottom: 4 },
   productDesc: { fontSize: 13, color: '#64748b' },
   tableWrapper: { overflowX: 'auto' },

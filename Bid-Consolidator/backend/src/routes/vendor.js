@@ -146,7 +146,7 @@ router.get('/items/:token', async (req, res) => {
 
     const { rows: items } = await pool.query(
       `SELECT item_index, style_num, description, moq AS target_moq, inner_pack, master_pack
-       FROM project_items WHERE project_id=$1 ORDER BY item_index`,
+       FROM project_items WHERE project_id=$1 AND deleted_at IS NULL ORDER BY item_index`,
       [t.project_id]
     );
     const { rows: quotes } = await pool.query(
@@ -161,6 +161,7 @@ router.get('/items/:token', async (req, res) => {
       factory_name: t.factory_name,
       project_id: t.project_id,
       project_name: t.project_name,
+      division: t.division || null,
       items: items.map(it => ({ ...it, quote: qByItem[it.item_index] || null })),
     });
   } catch (err) {

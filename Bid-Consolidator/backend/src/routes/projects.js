@@ -198,7 +198,7 @@ router.get('/:id/items', requireAuth, ownProject, async (req, res) => {
               c.original_name AS cad_name, c.content_type AS cad_type
        FROM project_items pi
        LEFT JOIN project_cads c ON c.id = pi.cad_id
-       WHERE pi.project_id=$1
+       WHERE pi.project_id=$1 AND pi.deleted_at IS NULL
        ORDER BY pi.item_index`,
       [req.params.id]
     );
@@ -242,11 +242,29 @@ router.post('/:id/items', requireAuth, ownProject, async (req, res) => {
   }
 });
 
-// Delete an item and its reference images.
+// Soft-delete an item (recoverable). Keeps its images/quotes so it can be restored.
 router.delete('/:id/items/:itemIndex', requireAuth, ownProject, async (req, res) => {
   try {
-    await pool.query('DELETE FROM project_item_images WHERE project_id=$1 AND item_index=$2', [req.params.id, req.params.itemIndex]);
-    await pool.query('DELETE FROM project_items WHERE project_id=$1 AND item_index=$2', [req.params.id, req.params.itemIndex]);
+    await pool.query('UPDATE project_items SET deleted_at=NOW() WHERE project_id=$1 AND item_index=$2', [req.params.id, req.params.itemIndex]);
+    res.json({ success: true });
+  } catch { res.status(500).json({ error: 'Server error' }); }
+});
+
+// List soft-deleted items (for the restore panel).
+router.get('/:id/items/deleted', requireAuth, ownProject, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT item_index, style_num, description FROM project_items WHERE project_id=$1 AND deleted_at IS NOT NULL ORDER BY item_index',
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch { res.status(500).json({ error: 'Server error' }); }
+});
+
+// Restore a soft-deleted item.
+router.post('/:id/items/:itemIndex/restore', requireAuth, ownProject, async (req, res) => {
+  try {
+    await pool.query('UPDATE project_items SET deleted_at=NULL WHERE project_id=$1 AND item_index=$2', [req.params.id, req.params.itemIndex]);
     res.json({ success: true });
   } catch { res.status(500).json({ error: 'Server error' }); }
 });
@@ -572,10 +590,11 @@ router.get('/:id/styles', requireAuth, ownProject, async (req, res) => {
               pi.inner_pack,
               pi.master_pack,
               COALESCE(img.image_count, 0)::int AS image_count
-       FROM (SELECT item_index, style_num, description, last_price, moq, inner_pack, master_pack FROM project_items WHERE project_id=$1) pi
+       FROM (SELECT item_index, style_num, description, last_price, moq, inner_pack, master_pack FROM project_items WHERE project_id=$1 AND deleted_at IS NULL) pi
        FULL OUTER JOIN
             (SELECT DISTINCT ON (item_index) item_index, style_num, description
              FROM quotes WHERE project_id=$1 AND item_index IS NOT NULL
+               AND item_index NOT IN (SELECT item_index FROM project_items WHERE project_id=$1 AND deleted_at IS NOT NULL)
              ORDER BY item_index, submitted_at) q
        ON pi.item_index = q.item_index
        LEFT JOIN
