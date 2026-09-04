@@ -422,9 +422,10 @@ router.post('/:id/items-from-excel', requireAuth, ownProject, upload.single('fil
         keys.push(key);
       }
       const { rows: itRows } = await pool.query(
-        `INSERT INTO project_items (project_id, item_index, style_num, description, moq, image_path)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [req.params.id, itemIndex, it.style_num || null, it.description || null, it.moq || null, keys[0] || null]
+        `INSERT INTO project_items (project_id, item_index, style_num, description, moq, last_price, image_path)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [req.params.id, itemIndex, it.style_num || null, it.description || null, it.moq || null,
+         (it.price != null ? it.price : null), keys[0] || null]
       );
       for (let p = 0; p < keys.length; p++) {
         await pool.query(

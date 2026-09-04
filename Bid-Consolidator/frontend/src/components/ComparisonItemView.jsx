@@ -230,7 +230,7 @@ export default function ComparisonItemView({ projectId, itemIndex, styleNum, des
                       <div style={s.imagePlaceholder}>—</div>
                     )}
                   </td>
-                  <td style={s.td}>{moq != null ? Number(moq).toLocaleString() : '—'}</td>
+                  <td style={s.td}>{quote.moq != null ? Number(quote.moq).toLocaleString() : (moq != null ? Number(moq).toLocaleString() : '—')}</td>
                   <td style={{ ...s.td, fontWeight: 700, color: tint.text }}>
                     ${quote.price ? parseFloat(quote.price).toFixed(2) : '—'}
                   </td>
