@@ -345,7 +345,7 @@ router.post('/:id/factories', requireAuth, ownProject, async (req, res) => {
       for (const entry of toInvite) {
         let factory;
         if (entry.factory_id) {
-          const { rows } = await client.query('SELECT * FROM factories WHERE id=$1 AND created_by=$2', [entry.factory_id, req.user.id]);
+          const { rows } = await client.query('SELECT * FROM factories WHERE id=$1', [entry.factory_id]);
           factory = rows[0];
           if (!factory) continue;
         } else {

@@ -159,7 +159,7 @@ export default function ProjectsTab() {
             </div>
             <div style={s.field}>
               <div style={{ fontSize: 12, color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
-                After creating the project, open it to <strong>upload design files (CADs)</strong> and build your item list from them.
+                After creating the project, open it to build your item list two ways: <strong>upload design files (CADs)</strong>, or <strong>import a sorted Excel sheet</strong>.
               </div>
             </div>
           </div>

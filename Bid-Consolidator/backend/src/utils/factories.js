@@ -15,9 +15,10 @@ function normalizeList(input) {
   return [...new Set(arr.map(e => String(e).trim()).filter(Boolean))];
 }
 
-// Insert or update a factory in the owner's directory. Uniqueness is per-owner
-// (created_by, lower(name)), so different users can each have a factory of the
-// same name. `emails` and `divisions` accept an array or comma-separated string.
+// Insert or update a factory in the shared directory. The directory is UNIVERSAL
+// (one list across all accounts), so uniqueness is global on lower(name). The
+// `created_by` field is kept only as an audit of who first added it. `emails` and
+// `divisions` accept an array or comma-separated string.
 async function upsertFactory(client, ownerId, name, emails, contactName, divisions) {
   const cleanName = String(name || '').trim();
   const cleanEmails = normalizeEmails(emails);
@@ -25,7 +26,7 @@ async function upsertFactory(client, ownerId, name, emails, contactName, divisio
   const cleanDivisions = normalizeList(divisions);
   const { rows } = await client.query(
     `INSERT INTO factories (name, emails, contact_name, divisions, created_by) VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (created_by, LOWER(name)) DO UPDATE
+     ON CONFLICT (LOWER(name)) DO UPDATE
        SET emails = CASE WHEN cardinality($2::text[]) > 0 THEN EXCLUDED.emails ELSE factories.emails END,
            contact_name = COALESCE(EXCLUDED.contact_name, factories.contact_name),
            divisions = CASE WHEN cardinality($4::text[]) > 0 THEN EXCLUDED.divisions ELSE factories.divisions END

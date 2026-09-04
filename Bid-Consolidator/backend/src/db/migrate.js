@@ -120,9 +120,35 @@ async function migrate() {
     // Assign any pre-existing (ownerless) factories to the first/admin user so
     // they don't vanish from the directory once we scope by owner.
     await client.query(`UPDATE factories SET created_by = (SELECT MIN(id) FROM users) WHERE created_by IS NULL;`);
-    // Uniqueness is now per-owner, not global, so two users can each have "ABC".
-    await client.query(`DROP INDEX IF EXISTS factories_name_lower_idx;`);
-    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS factories_owner_name_idx ON factories (created_by, LOWER(name));`);
+    // The factory directory is now UNIVERSAL (one shared list across all
+    // accounts), organized by division. Collapse any same-name duplicates that
+    // per-owner scoping may have created: merge their emails/divisions into the
+    // lowest-id survivor, repoint project links to it, delete the extras, then
+    // restore a global unique index on LOWER(name). Idempotent.
+    {
+      const { rows: dups } = await client.query(
+        `SELECT array_agg(id ORDER BY id) AS ids
+           FROM factories GROUP BY LOWER(name) HAVING COUNT(*) > 1`
+      );
+      for (const d of dups) {
+        const keep = d.ids[0];
+        const others = d.ids.slice(1);
+        const { rows: all } = await client.query(
+          'SELECT emails, divisions, contact_name FROM factories WHERE id = ANY($1)', [d.ids]
+        );
+        const emails = [...new Set(all.flatMap(r => r.emails || []).map(e => String(e).trim()).filter(Boolean))];
+        const divisions = [...new Set(all.flatMap(r => r.divisions || []).map(x => String(x).trim()).filter(Boolean))];
+        const contact = all.map(r => r.contact_name).find(Boolean) || null;
+        await client.query(
+          'UPDATE factories SET emails=$1, divisions=$2, contact_name=COALESCE(contact_name,$3) WHERE id=$4',
+          [emails, divisions, contact, keep]
+        );
+        await client.query('UPDATE project_factories SET factory_id=$1 WHERE factory_id = ANY($2)', [keep, others]);
+        await client.query('DELETE FROM factories WHERE id = ANY($1)', [others]);
+      }
+    }
+    await client.query(`DROP INDEX IF EXISTS factories_owner_name_idx;`);
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS factories_name_lower_idx ON factories (LOWER(name));`);
 
     // Per-user email templates (personalized formats). One row per (user, type);
     // absence means "use the built-in default". Bodies use [Placeholder] tokens.

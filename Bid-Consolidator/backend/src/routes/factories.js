@@ -15,12 +15,11 @@ function shape(row) {
   };
 }
 
-// List the logged-in user's factory directory
+// List the shared factory directory (universal across all accounts)
 router.get('/', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, name, emails, contact_name, divisions FROM factories WHERE created_by=$1 ORDER BY name',
-      [req.user.id]
+      'SELECT id, name, emails, contact_name, divisions FROM factories ORDER BY name'
     );
     res.json(rows.map(shape));
   } catch (err) {
@@ -42,7 +41,7 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
-// Update a factory's name/emails (only the user's own)
+// Update a factory's name/emails (shared directory — any account can edit)
 router.patch('/:id', requireAuth, async (req, res) => {
   const { name, email, emails, contact_name, divisions } = req.body;
   const cleanEmails = normalizeEmails(emails ?? email);
@@ -52,11 +51,11 @@ router.patch('/:id', requireAuth, async (req, res) => {
       `UPDATE factories
          SET name = COALESCE($1, name),
              emails = $2,
-             contact_name = NULLIF($5, ''),
-             divisions = $6
-       WHERE id=$3 AND created_by=$4
+             contact_name = NULLIF($4, ''),
+             divisions = $5
+       WHERE id=$3
        RETURNING id, name, emails, contact_name, divisions`,
-      [name || null, cleanEmails, req.params.id, req.user.id, (contact_name || '').trim(), cleanDivisions]
+      [name || null, cleanEmails, req.params.id, (contact_name || '').trim(), cleanDivisions]
     );
     if (!rows.length) return res.status(404).json({ error: 'Factory not found' });
     res.json(shape(rows[0]));
@@ -66,12 +65,12 @@ router.patch('/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Remove a factory from the user's directory
+// Remove a factory from the shared directory (any account can remove)
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const { rowCount } = await pool.query(
-      'DELETE FROM factories WHERE id=$1 AND created_by=$2',
-      [req.params.id, req.user.id]
+      'DELETE FROM factories WHERE id=$1',
+      [req.params.id]
     );
     if (!rowCount) return res.status(404).json({ error: 'Factory not found' });
     res.json({ success: true });

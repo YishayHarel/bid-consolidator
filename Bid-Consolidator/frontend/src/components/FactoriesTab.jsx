@@ -96,7 +96,7 @@ export default function FactoriesTab() {
     <div>
       <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>Factories</h2>
       <div style={{ fontSize: 12, color: '#64748b', marginBottom: 18 }}>
-        Your own factory list — only you can see it. Tag each factory with the division(s) it serves; a factory can belong to several. Multiple emails are comma-separated.
+        Shared company directory — every account sees and uses the same factory list. Tag each factory with the division(s) it serves; a factory can belong to several. Multiple emails are comma-separated.
       </div>
 
       <form onSubmit={addFactory} style={s.addForm}>
