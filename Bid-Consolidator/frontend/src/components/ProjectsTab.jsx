@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import api from '../utils/api';
-import ProjectBuilder from './ProjectBuilder';
 
 const DIVISIONS = ['Hydration', 'Pet Beauty', 'Hard Coolers', 'Soft Coolers', 'Kitchen', 'General'];
 
@@ -159,7 +158,7 @@ export default function ProjectsTab() {
             </div>
             <div style={s.field}>
               <div style={{ fontSize: 12, color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 12px' }}>
-                After creating the project, open it to build your item list two ways: <strong>upload design files (CADs)</strong>, or <strong>import a sorted Excel sheet</strong>.
+                After creating the project, go to the <strong>Compare</strong> tab to build its item list — <strong>upload CADs</strong> or <strong>import a sorted Excel sheet</strong>.
               </div>
             </div>
           </div>
@@ -174,9 +173,10 @@ export default function ProjectsTab() {
             .filter(p => p.id === selectedProjectId)
             .map(p => (
               <div key={p.id}>
-                <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 20 }}>{p.name}</h3>
-
-                <ProjectBuilder projectId={p.id} />
+                <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>{p.name}</h3>
+                <div style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>
+                  Build this project’s item list on the <strong>Compare</strong> tab (upload CADs or import Excel there). Invite the factories who’ll quote below.
+                </div>
 
                 <div style={s.factoriesSection}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
