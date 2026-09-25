@@ -1,0 +1,9 @@
+# This git repository's root is the home directory, with the app in
+# Bid-Consolidator/. Ignore EVERYTHING at the root except the app and CI, so a
+# stray `git add -A` can never stage personal files (shell history, tokens in
+# dotfiles, Documents, …). Recommended long-term: make Bid-Consolidator/ its own
+# repository root.
+/*
+!/.gitignore
+!/.github/
+!/Bid-Consolidator/

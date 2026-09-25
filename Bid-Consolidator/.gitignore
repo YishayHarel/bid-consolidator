@@ -1,6 +1,17 @@
 node_modules/
+dist/
+coverage/
+.DS_Store
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# local uploads (dev storage fallback)
 backend/uploads/*
 !backend/uploads/.gitkeep
-backend/.env
-dist/
-.DS_Store
+
+# database backups — never commit these
+*.dump
+*.sql.gz
