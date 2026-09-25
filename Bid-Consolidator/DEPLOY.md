@@ -63,8 +63,12 @@ first — the free Supabase tier has no automatic backups.
    `migrations up: 2 applied`. Deploy off-hours: the old version keeps serving for
    the minute or two until the new one is up.
 4. Everyone signs in again (sessions from v1 are not valid in v2).
-5. **Rotate the old default admin**: v1 docs and seed used `admin@shalom.com` /
-   `admin123`. Change that password (Settings → Your account) or delete the account.
+5. **Roles:** after the migration `admin@shalom.com` is the **only admin**;
+   every other existing account is a member. The admin can promote people in
+   Settings → Members & invites.
+6. **Immediately change that admin's password** (Settings → Your account): v1
+   docs and seed used `admin@shalom.com` / `admin123`, and it is now the account
+   that controls the organization.
 
 **Rollback:** redeploy the previous commit *and* restore the backup
 (`pg_restore --clean -d "$DATABASE_URL" bid-consolidator-pre-v2.dump`). The v2

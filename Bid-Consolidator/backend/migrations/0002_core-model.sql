@@ -32,9 +32,15 @@ WHERE NOT EXISTS (SELECT 1 FROM organizations);
 UPDATE users SET org_id = (SELECT min(id) FROM organizations) WHERE org_id IS NULL;
 ALTER TABLE users ALTER COLUMN org_id SET NOT NULL;
 
--- Existing accounts already had full access (no roles were enforced), so they
--- keep it as admins; new sign-ups default to member.
-UPDATE users SET role = 'admin';
+-- The original admin account (admin@shalom.com) is the only admin; everyone
+-- else becomes a member. If that account doesn't exist, users who already had
+-- the legacy 'admin' role keep it, so an organization is never left without an
+-- admin. New sign-ups default to member.
+UPDATE users SET role = CASE
+  WHEN lower(email) = 'admin@shalom.com' THEN 'admin'
+  WHEN role = 'admin' AND NOT EXISTS (SELECT 1 FROM users u2 WHERE lower(u2.email) = 'admin@shalom.com') THEN 'admin'
+  ELSE 'member'
+END;
 ALTER TABLE users ALTER COLUMN role SET DEFAULT 'member';
 ALTER TABLE users ALTER COLUMN role SET NOT NULL;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'member'));
