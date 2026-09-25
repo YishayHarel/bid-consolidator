@@ -48,8 +48,12 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAU
 CREATE TRIGGER users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_uidx ON users (lower(email));
 
--- Seed each org's sign-up domains from its members' work email domains
--- (public webmail and non-routable test domains excluded).
+-- Seed sign-up domains. Shalom International gets its two company domains
+-- (other domains its members happen to use are NOT opened to self-sign-up —
+-- an admin can add them in Settings). Any other org is seeded from its
+-- members' work email domains (public webmail and test domains excluded).
+UPDATE organizations SET allowed_domains = ARRAY['shalomint.com', 'shalom.com']
+ WHERE name = 'Shalom International' AND cardinality(allowed_domains) = 0;
 UPDATE organizations o
    SET allowed_domains = d.domains
   FROM (
@@ -261,11 +265,24 @@ UPDATE quotes q
   FROM project_items pi
  WHERE pi.project_id = q.project_id AND pi.item_index = q.item_index AND q.item_id IS NULL;
 
--- A factory had several rows for the same item: keep the winner, else the latest.
-DELETE FROM quotes q
- USING (SELECT id, row_number() OVER (PARTITION BY item_id, project_factory_id
-                                      ORDER BY is_selected_winner DESC NULLS LAST, submitted_at DESC NULLS LAST, id DESC) AS rn
-          FROM quotes WHERE item_id IS NOT NULL) d
+-- A factory had several rows on the same item (the old matcher could file
+-- several sheet rows under one item). Nothing is deleted: the best row stays
+-- on the item — the one whose Style # matches the item, else the winner, else
+-- one with a price, else the latest submission, else the first row — and the
+-- others become UNMATCHED rows the owner places from the Compare sheet.
+UPDATE quotes q
+   SET item_id = NULL, is_selected_winner = false
+  FROM (SELECT q2.id,
+               row_number() OVER (
+                 PARTITION BY q2.item_id, q2.project_factory_id
+                 ORDER BY (coalesce(btrim(q2.style_num), '') <> ''
+                           AND upper(btrim(q2.style_num)) = upper(btrim(coalesce(pi.style_num, '')))) DESC,
+                          q2.is_selected_winner DESC NULLS LAST,
+                          (q2.price IS NOT NULL) DESC,
+                          q2.submitted_at DESC NULLS LAST,
+                          q2.id ASC) AS rn
+          FROM quotes q2 JOIN project_items pi ON pi.id = q2.item_id
+         WHERE q2.item_id IS NOT NULL) d
  WHERE q.id = d.id AND d.rn > 1;
 
 UPDATE quotes SET is_selected_winner = false WHERE is_selected_winner IS NULL OR item_id IS NULL;
