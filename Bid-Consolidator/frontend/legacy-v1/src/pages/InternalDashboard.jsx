@@ -25,25 +25,43 @@ export default function InternalDashboard() {
 
   const currentTab = TABS.find(t => location.pathname.includes(t.id))?.id || 'projects';
 
+  // Authenticated live-updates socket with reconnect + backoff. The URL is derived
+  // from the API base (wss://<backend>/ws in prod) unless VITE_WS_URL overrides.
   useEffect(() => {
-    const wsUrl = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:4000/ws`;
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'quote:new') {
-          setLiveAlert(`New quote from ${msg.factory_name}`);
-          setTimeout(() => setLiveAlert(null), 5000);
-        }
-      } catch {}
-    };
-    ws.onerror = () => {};
-    return () => ws.close();
+    let ws, timer, closed = false, attempt = 0;
+    function wsUrl() {
+      if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+      const api = import.meta.env.VITE_API_URL;
+      if (api && /^https?:/.test(api)) return api.replace(/^http/, 'ws').replace(/\/api\/?$/, '') + '/ws';
+      return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`; // dev: Vite proxies /ws
+    }
+    function connect() {
+      const token = localStorage.getItem('token');
+      if (!token || closed) return;
+      ws = new WebSocket(`${wsUrl()}?token=${encodeURIComponent(token)}`);
+      ws.onopen = () => { attempt = 0; };
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'quote:new') {
+            setLiveAlert(`New quote from ${msg.factory_name}`);
+            setTimeout(() => setLiveAlert(null), 5000);
+          }
+        } catch {}
+      };
+      ws.onclose = (e) => {
+        if (closed || e.code === 4401) return; // unauthorized: don't retry
+        timer = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempt++));
+      };
+      ws.onerror = () => {};
+    }
+    connect();
+    return () => { closed = true; clearTimeout(timer); ws && ws.close(); };
   }, []);
 
   function logout() {
     localStorage.removeItem('token');
-    navigate('/vendor');
+    navigate('/admin');
   }
 
   return (
