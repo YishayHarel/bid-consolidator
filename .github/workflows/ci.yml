@@ -1,0 +1,68 @@
+# CI: every push and pull request must pass lint, strict type-checking, the
+# full test suite (against a real PostgreSQL), a production dependency audit,
+# and a production build — before anything reaches Render/Vercel.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint · types · tests · audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Bid-Consolidator/backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      TEST_DB_HOST: localhost
+      TEST_DB_USER: postgres
+      TEST_DB_PASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Bid-Consolidator/backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+
+  frontend:
+    name: Frontend (lint · types · tests · build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Bid-Consolidator/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: Bid-Consolidator/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env:
+          VITE_API_URL: https://bid-consolidator-api.onrender.com/api
+      - run: npm audit --omit=dev --audit-level=high

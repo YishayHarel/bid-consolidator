@@ -14,6 +14,26 @@
       "runtimeArgs": ["start"],
       "cwd": "backend",
       "port": 4000
+    },
+    {
+      "name": "backend-local",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "src/server.ts"],
+      "cwd": "backend",
+      "port": 4000,
+      "env": {
+        "DATABASE_URL": "",
+        "SUPABASE_URL": "",
+        "SUPABASE_SERVICE_KEY": "",
+        "GEMINI_API_KEY": "",
+        "SMTP_HOST": "",
+        "DB_HOST": "/tmp",
+        "DB_NAME": "bc_browser",
+        "ALLOWED_SIGNUP_DOMAINS": "shalomint.com,shalom.com",
+        "FRONTEND_URL": "http://localhost:5173",
+        "NODE_ENV": "development",
+        "PORT": "4000"
+      }
     }
   ]
 }
