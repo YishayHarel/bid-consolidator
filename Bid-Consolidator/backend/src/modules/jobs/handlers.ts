@@ -7,7 +7,8 @@
 // instead of importing twice.
 import type { PoolClient } from 'pg';
 import { pool, query, queryOne, withTx } from '../../db/pool.js';
-import { badRequest } from '../../lib/errors.js';
+import { config } from '../../config.js';
+import { AppError, badRequest } from '../../lib/errors.js';
 import { registerJob, type JobContext } from '../../lib/jobs.js';
 import { logger } from '../../lib/logger.js';
 import { publish } from '../../lib/realtime.js';
@@ -16,6 +17,7 @@ import { cropBox, detectProducts, imageToPng, renderPdfToPages } from '../../dom
 import { extractImagesByRow } from '../../domain/excel/extractImages.js';
 import { parseQuoteExcel } from '../../domain/excel/parseQuoteExcel.js';
 import { matchItem } from '../../domain/matching.js';
+import { deliverEmail, prepareEmail, type EmailInput, type Prepared } from '../emails/send.js';
 import { activeItems, createItems, type NewItem } from '../items/repo.js';
 
 async function saveResult(tx: PoolClient, jobId: number, result: unknown) {
@@ -223,4 +225,47 @@ registerJob('purge-objects', async () => {
     purged += keys.length;
   }
   return { purged };
+});
+
+// ---- Batch email send -----------------------------------------------------------
+// One email at a time, paced under Outlook's ~30-per-minute limit. A failed
+// email is reported and the rest still go out — except when the sender's
+// mailbox itself is the problem (not connected / expired / refused), which
+// would fail every remaining email the same way. A retried job skips emails
+// already logged for it, so nobody gets the same email twice.
+const STOP_BATCH = new Set(['mail_not_connected', 'mail_reconnect', 'mail_forbidden', 'unavailable']);
+
+registerJob('send-emails', async (payload, ctx) => {
+  const { projectId, emails } = payload as { projectId: number; emails: (EmailInput & { key: string })[] };
+  const userId = ctx.job.user_id;
+  const sender = userId ? await queryOne<{ id: number; email: string }>(pool, 'SELECT id, email FROM users WHERE id = $1', [userId]) : null;
+  const project = await queryOne(pool, 'SELECT 1 FROM projects WHERE id = $1 AND created_by = $2', [projectId, userId]);
+  if (!sender || !project) throw badRequest('This project or its owner no longer exists.');
+
+  const done = new Set((await query<{ item_key: string }>(pool,
+    'SELECT item_key FROM email_log WHERE job_id = $1', [ctx.job.id])).map((r) => r.item_key));
+  const sent: { key: string; to: string[] }[] = [];
+  const failed: { key: string; factoryName: string | null; error: string }[] = [];
+  let stopReason: string | null = null;
+  let lastSendAt = 0;
+
+  for (const [i, email] of emails.entries()) {
+    if (done.has(email.key)) { sent.push({ key: email.key, to: [] }); continue; }
+    let prepared: Prepared | null = null;
+    try {
+      if (stopReason) throw new AppError(409, stopReason, 'stopped');
+      prepared = await prepareEmail(pool, projectId, sender, email);
+      const wait = lastSendAt + config.MAIL_SEND_INTERVAL_MS - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      lastSendAt = Date.now();
+      const r = await deliverEmail(projectId, ctx.job.org_id, sender, prepared, { jobId: ctx.job.id, key: email.key });
+      sent.push({ key: email.key, to: r.to });
+    } catch (err) {
+      if (!(err instanceof AppError)) throw err; // infrastructure failure: let the job retry
+      failed.push({ key: email.key, factoryName: prepared?.factoryName ?? null, error: err.message });
+      if (STOP_BATCH.has(err.code)) stopReason = err.message;
+    }
+    await ctx.progress(Math.round(((i + 1) / emails.length) * 100), `Sent ${sent.length} of ${emails.length}${failed.length ? ` · ${failed.length} failed` : ''}`);
+  }
+  return { sent: sent.length, failed, total: emails.length };
 });

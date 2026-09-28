@@ -41,6 +41,10 @@ nothing), and quotes never rely on row positions.
   invite-only: a single-use, 14-day invite bound to one email address, created by
   an admin (Settings → Members & invites). Typing a company address grants nothing.
   Login/register are rate-limited; login timing doesn't reveal whether an account exists.
+- **Email**: sent as the buyer from their own Outlook (Microsoft Graph, delegated
+  `Mail.Send` — send-only). The connected mailbox must match the buyer's login
+  email; tokens are AES-256-GCM encrypted at rest. Batch sends run as a paced
+  background job that never re-sends an email on retry.
 - **Tenancy**: every project route loads the project scoped to the user's org
   *and* ownership, and returns 404 otherwise (ids can't be probed).
 - **Factory portal**: the link token (random UUID) is the only credential and

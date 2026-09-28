@@ -5,13 +5,14 @@
 import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { api } from './client';
 import type {
-  Cad, CompareSheet, EmailDrafts, EmailTemplate, EmailType, Factory, InvitedFactory, Invite, Item, Job,
+  BatchEmail, Cad, CompareSheet, EmailDrafts, EmailTemplate, EmailType, Factory, InvitedFactory, Invite, Item, Job, MailStatus,
   LandedCostInputs, LandedCostSheet, LandedCostSettings, Member, OrgSettings, Page, PortalView, Project,
   Quote, VendorLink,
 } from './types';
 
 export const qk = {
   me: ['me'] as const,
+  mail: ['mail'] as const,
   projects: ['projects'] as const,
   project: (id: number) => ['project', id] as const,
   compare: (id: number) => ['compare', id] as const,
@@ -187,7 +188,7 @@ export function useSendEmail(projectId: number) {
   const inv = useInvalidate();
   return useMutation({
     mutationFn: (body: { type: EmailType; projectFactoryId?: number; subject: string; body: string; dueDate?: string }) =>
-      api.post<{ sent: boolean; to: string[] }>(`/projects/${projectId}/emails/send`, body),
+      api.post<{ sent: boolean; to: string[]; via: 'outlook' | 'smtp' | 'test' }>(`/projects/${projectId}/emails/send`, body),
     onSuccess: () => inv(qk.drafts(projectId), qk.invited(projectId), qk.vendorLinks),
   });
 }
@@ -198,6 +199,27 @@ export function usePrepareLink(projectId: number) {
       api.post<{ portalUrl: string }>(`/projects/${projectId}/emails/link`, body),
     onSuccess: () => inv(qk.vendorLinks),
   });
+}
+export function useSendBatch(projectId: number) {
+  const inv = useInvalidate();
+  return useMutation({
+    mutationFn: (emails: BatchEmail[]) => api.post<Job>(`/projects/${projectId}/emails/batch`, { emails }),
+    onSuccess: () => inv(qk.jobs(projectId)),
+  });
+}
+
+// ---- Outlook (send as yourself) -----------------------------------------------------------------
+export const useMailStatus = () => useQuery({ queryKey: qk.mail, queryFn: () => api.get<MailStatus>('/mail/status') });
+export function useConnectOutlook() {
+  // Opens Microsoft sign-in; Microsoft sends the browser back to Settings.
+  return useMutation({
+    mutationFn: () => api.post<{ url: string }>('/mail/microsoft/connect'),
+    onSuccess: ({ url }) => { window.location.assign(url); },
+  });
+}
+export function useDisconnectOutlook() {
+  const inv = useInvalidate();
+  return useMutation({ mutationFn: () => api.delete('/mail/microsoft'), onSuccess: () => inv(qk.mail) });
 }
 export const useTemplates = () => useQuery({ queryKey: qk.templates, queryFn: () => api.get<EmailTemplate[]>('/email-templates') });
 export function useSaveTemplate() {

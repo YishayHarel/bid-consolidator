@@ -16,7 +16,7 @@ import { AppError } from './errors.js';
 import { logger } from './logger.js';
 import { publish } from './realtime.js';
 
-export type JobType = 'import-excel' | 'detect-items' | 'import-quotes' | 'purge-objects';
+export type JobType = 'import-excel' | 'detect-items' | 'import-quotes' | 'purge-objects' | 'send-emails';
 
 export interface JobRow {
   id: number;

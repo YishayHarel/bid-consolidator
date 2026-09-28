@@ -1,19 +1,22 @@
 // Email drafts, sending, and per-user templates.
 //
 // Drafts are READ-ONLY (the old GET minted portal tokens as a side effect).
-// Sending resolves recipients from the factory record on the server — the
-// request can't choose arbitrary addresses — and inserts a valid portal link at
-// send time (a fresh one for Best & Final rounds). Every send is logged.
+// Sending (single or batch) lives in ./send.ts: recipients come from the
+// factory record on the server, the portal link is inserted at send time, and
+// each email goes out from the buyer's own Outlook when connected.
 import { Router } from 'express';
 import { z } from 'zod';
 import { pool, query, queryOne, withTx } from '../../db/pool.js';
-import { badRequest, notFound } from '../../lib/errors.js';
-import { sendMail } from '../../lib/mailer.js';
+import { config } from '../../config.js';
+import { AppError, badRequest, notFound } from '../../lib/errors.js';
+import { enqueue, jobDTO } from '../../lib/jobs.js';
+import { hasMailbox } from '../../lib/outlook.js';
 import { id, parseBody, parseParams } from '../../lib/validate.js';
 import { formatOverpricedLines, overpricedByFactory } from '../../domain/bestAndFinal.js';
 import { DEFAULT_TEMPLATES, fillTemplate, TEMPLATE_TYPES, type TemplateType } from '../../domain/emailTemplates.js';
 import { currentProject, currentUser, loadProject, requireAuth } from '../../middleware/auth.js';
 import { ensureLink, portalUrl } from '../links/tokens.js';
+import { deliverEmail, emailInput, prepareEmail } from './send.js';
 
 // ---- Templates (per user) ------------------------------------------------------
 export const templatesRouter = Router();
@@ -146,45 +149,29 @@ projectEmailsRouter.post('/emails/link', async (req, res) => {
 });
 
 projectEmailsRouter.post('/emails/send', async (req, res) => {
-  const body = parseBody(req, z.object({
-    type: z.enum(['vendor_invite', 'follow_up_reminder', 'revision_request', 'comparison_ready']),
-    projectFactoryId: id.optional(),
-    subject: z.string().trim().min(1).max(300),
-    body: z.string().trim().min(1).max(20_000),
-    dueDate: z.iso.date().optional(),
+  const input = parseBody(req, emailInput);
+  const p = currentProject(req);
+  const u = currentUser(req);
+  const prepared = await prepareEmail(pool, p.id, u, input);
+  const r = await deliverEmail(p.id, u.orgId, u, prepared);
+  res.json({ sent: true, to: r.to, via: r.via });
+});
+
+// Send several reviewed emails in one go. Everything is checked up front (a
+// bad row fails the whole request before anything is sent); the sending itself
+// runs as a background job, paced to stay under Outlook's per-minute limit,
+// and reports which emails went out and which failed.
+projectEmailsRouter.post('/emails/batch', async (req, res) => {
+  const { emails } = parseBody(req, z.object({
+    emails: z.array(emailInput.extend({ key: z.string().min(1).max(100) })).min(1).max(200),
   }));
   const p = currentProject(req);
   const u = currentUser(req);
-
-  if (body.type === 'comparison_ready') {
-    // Internal summary: only ever sent to the signed-in user.
-    await sendMail({ to: [u.email], subject: body.subject, text: body.body });
-    await pool.query(`INSERT INTO email_log (org_id, project_id, user_id, type, recipients, subject) VALUES ($1, $2, $3, $4, $5, $6)`,
-      [u.orgId, p.id, u.id, body.type, [u.email], body.subject]);
-    return res.json({ sent: true, to: [u.email] });
+  if (new Set(emails.map((e) => e.key)).size !== emails.length) throw badRequest('Each email in a batch needs a unique key.');
+  for (const e of emails) await prepareEmail(pool, p.id, u, e);
+  if (!(await hasMailbox(u.id)) && !config.smtpEnabled && !config.isTest) {
+    throw new AppError(409, 'Connect your Outlook in Settings to send email from the site.', 'mail_not_connected');
   }
-
-  if (!body.projectFactoryId) throw badRequest('Pick which factory to email.');
-  const factory = await queryOne<{ name: string; emails: string[] }>(pool,
-    `SELECT f.name, f.emails FROM project_factories pf JOIN factories f ON f.id = pf.factory_id
-      WHERE pf.id = $1 AND pf.project_id = $2`, [body.projectFactoryId, p.id]);
-  if (!factory) throw notFound('Invited factory');
-  if (!factory.emails.length) throw badRequest(`No email address on file for ${factory.name}. Add one in the factory directory.`);
-
-  let text = body.body;
-  if (body.dueDate) {
-    const due = new Date(`${body.dueDate}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
-    text = text.split('[Due Date]').join(due);
-  }
-  if (body.type === 'revision_request' && text.includes('[Due Date]')) throw badRequest('Pick a due date for the revised pricing.');
-
-  const link = await withTx((tx) => ensureLink(tx, body.projectFactoryId!, body.type === 'revision_request' ? 'revision' : 'quote', u.id));
-  text = text.split('[Portal Link]').join(portalUrl(link.token));
-
-  await sendMail({ to: factory.emails, subject: body.subject, text, replyTo: u.email });
-  await pool.query(
-    `INSERT INTO email_log (org_id, project_id, project_factory_id, user_id, type, recipients, subject)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [u.orgId, p.id, body.projectFactoryId, u.id, body.type, factory.emails, body.subject]);
-  res.json({ sent: true, to: factory.emails });
+  const job = await enqueue(pool, { orgId: u.orgId, userId: u.id, projectId: p.id, type: 'send-emails', payload: { projectId: p.id, emails } });
+  res.status(202).json(jobDTO(job));
 });

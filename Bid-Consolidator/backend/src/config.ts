@@ -19,6 +19,7 @@ const optionalString = z
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   RENDER: optionalString, // set automatically by Render
+  RENDER_EXTERNAL_URL: optionalString, // set automatically by Render (this service's public URL)
   PORT: z.coerce.number().int().positive().default(4000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
@@ -41,6 +42,7 @@ const schema = z.object({
   // Web
   FRONTEND_URL: z.string().default('http://localhost:5173'), // comma-separated allowed origins
   PUBLIC_APP_URL: optionalString, // base for links in emails; defaults to first FRONTEND_URL
+  PUBLIC_API_URL: optionalString, // this API's public base URL (OAuth redirects); defaults to RENDER_EXTERNAL_URL
 
   // Storage (Supabase). Required in production.
   SUPABASE_URL: optionalString,
@@ -55,6 +57,14 @@ const schema = z.object({
   SMTP_PASS: optionalString,
   SMTP_SECURE: flag(false),
   SMTP_FROM: optionalString,
+  // Send as each buyer from their own Outlook (Microsoft 365, via Microsoft Graph).
+  MS_TENANT_ID: optionalString,
+  MS_CLIENT_ID: optionalString,
+  MS_CLIENT_SECRET: optionalString,
+  MAIL_TOKEN_KEY: optionalString, // encrypts stored Outlook tokens; derived from JWT_SECRET when unset
+  MS_LOGIN_URL: z.string().default('https://login.microsoftonline.com'), // overridable for tests
+  MS_GRAPH_URL: z.string().default('https://graph.microsoft.com/v1.0'),   // overridable for tests
+  MAIL_SEND_INTERVAL_MS: z.coerce.number().int().min(0).default(2500), // Exchange allows ~30 sends/minute
 
   // AI CAD reading
   GEMINI_API_KEY: optionalString,
@@ -95,6 +105,8 @@ function load() {
     appUrl: (env.PUBLIC_APP_URL ?? origins[0] ?? 'http://localhost:5173').replace(/\/+$/, ''),
     storageMode: env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY ? ('supabase' as const) : ('local' as const),
     smtpEnabled: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS),
+    outlookEnabled: !!(env.MS_TENANT_ID && env.MS_CLIENT_ID && env.MS_CLIENT_SECRET),
+    apiUrl: (env.PUBLIC_API_URL ?? env.RENDER_EXTERNAL_URL ?? `http://localhost:${env.PORT}`).replace(/\/+$/, ''),
     aiEnabled: !!env.GEMINI_API_KEY,
   };
 }

@@ -243,3 +243,11 @@ h1, h2, h3, h4 { color: var(--navy); margin: 0; }
   .main { padding: 14px; }
   .cmp-item__head { flex-direction: column; }
 }
+
+/* Batch email send */
+.section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.section-head__actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.draft__check { margin-right: 8px; vertical-align: middle; width: 16px; height: 16px; cursor: pointer; }
+.batch-list { margin: 0; padding-left: 18px; max-height: 320px; overflow: auto; display: grid; gap: 6px; }
+.stack--tight { gap: 8px; }

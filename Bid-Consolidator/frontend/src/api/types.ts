@@ -76,6 +76,9 @@ export interface EmailDraft {
   subject: string; body: string;
 }
 export interface EmailDrafts { inviteTemplate: { subject: string; body: string }; senderName: string; drafts: EmailDraft[] }
+export interface MailStatus { available: boolean; connected: boolean; address: string | null; connectedAt: string | null }
+export interface BatchEmail { key: string; type: EmailType; projectFactoryId?: number; subject: string; body: string; dueDate?: string }
+export interface BatchResult { sent: number; total: number; failed: { key: string; factoryName: string | null; error: string }[] }
 export interface EmailTemplate { type: Exclude<EmailType, never>; subject: string; body: string; isCustom: boolean }
 
 export type JobState = 'queued' | 'running' | 'succeeded' | 'failed';

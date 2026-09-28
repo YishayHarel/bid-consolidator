@@ -24,3 +24,7 @@ export const toNum = (v: string): number | null => {
 };
 
 export const DIVISIONS = ['Hydration', 'Pet Beauty', 'Hard Coolers', 'Soft Coolers', 'Kitchen', 'General'];
+
+/** "Thursday, October 15, 2026" for a YYYY-MM-DD date (as it appears in emails). */
+export const longDate = (iso: string) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });

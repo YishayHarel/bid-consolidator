@@ -1,9 +1,10 @@
 // Settings: the shared factory directory (everyone in the org), your account,
 // and — for admins — org defaults, members and invites (the only way to join).
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router';
 import { errorMessage } from '../api/client';
 import {
-  useCreateInvite, useDeleteFactory, useFactories, useInvites, useMembers, useOrgSettings, useRevokeInvite,
+  useConnectOutlook, useCreateInvite, useDeleteFactory, useDisconnectOutlook, useMailStatus, useFactories, useInvites, useMembers, useOrgSettings, useRevokeInvite,
   useSaveFactory, useSetRole, useUpdateOrg,
 } from '../api/hooks';
 import { api } from '../api/client';
@@ -20,11 +21,66 @@ export default function SettingsPage() {
   return (
     <div className="page stack">
       <h1 className="page__title">Settings</h1>
+      <OutlookCard />
       <FactoryDirectory />
       <AccountCard />
       {isAdmin && <OrgCard />}
       {isAdmin && <MembersCard />}
     </div>
+  );
+}
+
+const OUTLOOK_OUTCOME: Record<string, [string, 'success' | 'error' | undefined]> = {
+  connected: ['Outlook connected — emails you send from the site now come from your own mailbox.', 'success'],
+  mismatch: ['That Microsoft account isn\'t yours. Sign in with the mailbox that matches your login email.', 'error'],
+  cancelled: ['Outlook connection cancelled.', undefined],
+  expired: ['That sign-in took too long or was invalid. Please try again.', 'error'],
+  error: ['Couldn\'t connect Outlook. Please try again, or ask IT if it keeps failing.', 'error'],
+};
+
+function OutlookCard() {
+  const status = useMailStatus();
+  const connect = useConnectOutlook();
+  const disconnect = useDisconnectOutlook();
+  const { toast, confirm } = useFeedback();
+  const [params, setParams] = useSearchParams();
+
+  // Microsoft sends the browser back here with ?outlook=<outcome>.
+  const outcome = params.get('outlook');
+  const reported = useRef<string | null>(null);
+  useEffect(() => {
+    if (!outcome || reported.current === outcome) return;
+    reported.current = outcome;
+    const [msg, tone] = OUTLOOK_OUTCOME[outcome] ?? OUTLOOK_OUTCOME.error!;
+    toast(msg, tone);
+    void status.refetch();
+    setParams((p) => { p.delete('outlook'); return p; }, { replace: true });
+  }, [outcome]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (status.isPending) return <Card title="Send from Outlook"><Loading /></Card>;
+  if (status.isError) return <Card title="Send from Outlook"><ErrorBox error={status.error} /></Card>;
+  const s = status.data;
+  return (
+    <Card title="Send from Outlook">
+      {!s.available ? (
+        <p className="muted small">Sending from Outlook isn't set up on the server yet — ask your admin. Until then, use <strong>Copy</strong> on the Emails tab.</p>
+      ) : s.connected ? (
+        <div className="row">
+          <Badge tone="success">Connected</Badge>
+          <span>Emails you send from the site go out from <strong>{s.address}</strong> and appear in your Sent folder.</span>
+          <Button size="sm" variant="ghost" busy={disconnect.isPending} onClick={async () => {
+            if (await confirm({ title: 'Disconnect Outlook?', body: 'You can reconnect any time. Until then, Send is unavailable and you can use Copy.', confirmLabel: 'Disconnect' })) {
+              disconnect.mutate(undefined, { onSuccess: () => toast('Outlook disconnected'), onError: (e) => toast(errorMessage(e), 'error') });
+            }
+          }}>Disconnect</Button>
+        </div>
+      ) : (
+        <div className="row">
+          <span className="grow">Connect your Outlook so factory emails go out from your own address, land in your Sent folder, and replies come straight back to you. The site can only send as you — it can't read your mail.</span>
+          <Button variant="primary" busy={connect.isPending} onClick={() => connect.mutate(undefined, { onError: (e) => toast(errorMessage(e), 'error') })}>Connect Outlook</Button>
+        </div>
+      )}
+    </Card>
   );
 }
 

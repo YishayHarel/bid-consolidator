@@ -15,7 +15,7 @@ import { CompareItem } from './CompareItem';
 import { useProjectId } from './ProjectLayout';
 
 const JOB_LABEL: Record<string, string> = {
-  'import-excel': 'Importing Excel', 'detect-items': 'Reading CADs with AI', 'import-quotes': 'Importing factory quote', 'purge-objects': 'Cleaning up files',
+  'import-excel': 'Importing Excel', 'detect-items': 'Reading CADs with AI', 'import-quotes': 'Importing factory quote', 'purge-objects': 'Cleaning up files', 'send-emails': 'Sending emails',
 };
 
 export default function ComparePage() {

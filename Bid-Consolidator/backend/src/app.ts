@@ -17,6 +17,7 @@ import { factoriesRouter } from './modules/factories/routes.js';
 import { filesRouter } from './modules/files/routes.js';
 import { itemsRouter } from './modules/items/routes.js';
 import { jobsRouter } from './modules/jobs/routes.js';
+import { mailCallbackRouter, mailRouter } from './modules/mail/routes.js';
 import { orgRouter } from './modules/org/routes.js';
 import { portalRouter } from './modules/portal/routes.js';
 import { projectFactoriesRouter } from './modules/projectFactories/routes.js';
@@ -68,6 +69,7 @@ export function createApp() {
   app.use('/api/auth', authRouter);
   app.use('/api/portal', portalRouter); // public: factory link token is the credential
   app.use('/api/files', filesRouter);   // public: signed URL is the credential
+  app.use('/api/mail', mailCallbackRouter); // public: Microsoft's OAuth redirect (signed state)
 
   const authed = express.Router();
   authed.use(apiLimiter, requireAuth);
@@ -81,6 +83,7 @@ export function createApp() {
   authed.use('/vendor-links', vendorLinksRouter);
   authed.use('/email-templates', templatesRouter);
   authed.use('/jobs', jobsRouter);
+  authed.use('/mail', mailRouter);
   app.use('/api', authed);
 
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found', code: 'not_found' }));

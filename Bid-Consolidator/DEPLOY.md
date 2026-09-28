@@ -29,7 +29,9 @@ The app lives under `Bid-Consolidator/` in the repository, so use
 | `JWT_SECRET` | ✅ | 32+ random chars |
 | `FRONTEND_URL` | ✅ | allowed origins, comma-separated: `https://bid-consolidator.vercel.app,https://bidconsolidator.vercel.app` |
 | `PUBLIC_APP_URL` | | base for portal links in emails; defaults to the first `FRONTEND_URL` |
-| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `SMTP_SECURE` `SMTP_FROM` | | server-side sending; without it use **Copy** |
+| `MS_TENANT_ID` `MS_CLIENT_ID` `MS_CLIENT_SECRET` | | send from each buyer's own Outlook — see **Outlook sending** below |
+| `MAIL_TOKEN_KEY` | | optional; encrypts stored Outlook tokens (32+ random chars) |
+| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `SMTP_SECURE` `SMTP_FROM` | | optional fallback for buyers who haven't connected Outlook; without either, use **Copy** |
 | `GEMINI_API_KEY` | | AI CAD splitting — use a **paid** key for customer artwork |
 | `DB_CA_CERT` | recommended | Supabase CA cert (Project Settings → Database → SSL). Enables full TLS verification |
 
@@ -74,6 +76,34 @@ first — the free Supabase tier has no automatic backups.
 (`pg_restore --clean -d "$DATABASE_URL" bid-consolidator-pre-v2.dump`). The v2
 migration is intentionally not reversible in place.
 
+## Outlook sending (one-time, needs a Microsoft 365 admin)
+
+Buyers send factory emails — one at a time or in a batch — from their **own**
+Outlook mailbox: the email shows in their Sent folder and replies go straight
+to them. The app gets *delegated* `Mail.Send` only: it can send as a buyer who
+connected, and cannot read anyone's mail.
+
+1. **Microsoft Entra admin center → App registrations → New registration**
+   - Name: `Bid Consolidator`
+   - Supported account types: *Accounts in this organizational directory only*
+   - Redirect URI: platform **Web**, `https://bid-consolidator-api.onrender.com/api/mail/microsoft/callback`
+2. **API permissions → Add → Microsoft Graph → Delegated**: `Mail.Send`, `User.Read`,
+   `offline_access`, `openid`, `email` → **Grant admin consent for Shalom**.
+3. **Certificates & secrets → New client secret** (24 months). Copy the *Value*.
+4. From the app's **Overview** copy the *Directory (tenant) ID* and *Application (client) ID*.
+5. **Render → Environment**: set `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`
+   (and optionally `MAIL_TOKEN_KEY`). Render redeploys.
+6. Each buyer: **Settings → Send from Outlook → Connect Outlook**, sign in with their
+   own work account. The mailbox must match their login email.
+
+Notes
+- Exchange allows ~30 emails a minute per mailbox; batches are paced to stay under it.
+- Put a calendar reminder to renew the client secret before it expires.
+- Mimecast: mail leaves through Exchange Online as usual, so existing outbound
+  policies apply.
+- Try it locally without Microsoft: start the `fake-microsoft` and
+  `backend-outlook-dev` launch configs (sent emails are logged, not delivered).
+
 ## Production checklist
 
 - [ ] **Supabase Pro** — the free tier pauses after a week idle (the site goes
@@ -82,7 +112,7 @@ migration is intentionally not reversible in place.
       takes ~30–50 s and background jobs pause while asleep.
 - [ ] `DB_CA_CERT` set (full TLS verification to the database).
 - [ ] Paid Gemini key (free tier may use uploaded designs for training).
-- [ ] SMTP configured, or agree to send with **Copy**.
+- [ ] Outlook sending set up (below), or agree to send with **Copy**.
 - [ ] Custom domain for both apps (e.g. `app.` / `api.` on your domain) — then
       sessions can move to httpOnly cookies (see ARCHITECTURE.md).
 - [ ] Old `admin@shalom.com` account rotated or removed.

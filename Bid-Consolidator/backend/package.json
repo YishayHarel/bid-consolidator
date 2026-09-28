@@ -17,7 +17,8 @@
     "test:watch": "vitest",
     "migrate": "tsx src/db/migrate.ts up",
     "migrate:down": "tsx src/db/migrate.ts down",
-    "seed": "tsx src/db/seed.ts"
+    "seed": "tsx src/db/seed.ts",
+    "fake-microsoft": "tsx scripts/fake-microsoft.ts"
   },
   "dependencies": {
     "@google/genai": "^2.19.0",
