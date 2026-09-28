@@ -37,8 +37,9 @@ nothing), and quotes never rely on row positions.
 
 ### Security model
 
-- **Sessions**: JWT (HS256, 8 h) carrying user, org and role. Sign-up is limited
-  to an org's email domains or a single-use, email-bound admin invite.
+- **Sessions**: JWT (HS256, 8 h) carrying user, org and role. Sign-up is
+  invite-only: a single-use, 14-day invite bound to one email address, created by
+  an admin (Settings → Members & invites). Typing a company address grants nothing.
   Login/register are rate-limited; login timing doesn't reveal whether an account exists.
 - **Tenancy**: every project route loads the project scoped to the user's org
   *and* ownership, and returns 404 otherwise (ids can't be probed).

@@ -18,7 +18,6 @@ export const testEnv = {
   SUPABASE_SERVICE_KEY: '',
   GEMINI_API_KEY: '',
   SMTP_HOST: '',
-  ALLOWED_SIGNUP_DOMAINS: '',
   FRONTEND_URL: 'http://localhost:5173',
   LOCAL_STORAGE_DIR: path.join(os.tmpdir(), 'bid-consolidator-test-uploads'),
   RUN_JOBS: 'false',

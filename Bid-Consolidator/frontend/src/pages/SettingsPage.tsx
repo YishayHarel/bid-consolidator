@@ -1,5 +1,5 @@
 // Settings: the shared factory directory (everyone in the org), your account,
-// and — for admins — org defaults, sign-up domains, members and invites.
+// and — for admins — org defaults, members and invites (the only way to join).
 import { useMemo, useState, type FormEvent } from 'react';
 import { errorMessage } from '../api/client';
 import {
@@ -140,7 +140,6 @@ function OrgCard() {
   const org = useOrgSettings();
   const update = useUpdateOrg();
   const { toast } = useFeedback();
-  const [domain, setDomain] = useState('');
   if (org.isPending) return <Card title="Organization"><Loading /></Card>;
   if (org.isError) return <Card title="Organization"><ErrorBox error={org.error} /></Card>;
   const o = org.data;
@@ -149,7 +148,6 @@ function OrgCard() {
     if (n === null || n < 0) return toast('Enter a valid number', 'error');
     update.mutate({ landedCost: { [key]: n } }, { onSuccess: () => toast('Default saved'), onError: (e) => toast(errorMessage(e), 'error') });
   };
-  const setDomains = (list: string[]) => update.mutate({ allowedDomains: list }, { onError: (e) => toast(errorMessage(e), 'error') });
 
   return (
     <Card title={`Organization — ${o.name}`}>
@@ -158,17 +156,6 @@ function OrgCard() {
         <label className="mini-field"><span>Commission divisor</span><InlineInput value={field(o.landedCost.commissionDivisor)} onSave={(v) => saveLc('commissionDivisor', v)} /></label>
         <label className="mini-field"><span>Freight per 40' container ($)</span><InlineInput value={field(o.landedCost.freightPerContainer)} onSave={(v) => saveLc('freightPerContainer', v)} /></label>
         <label className="mini-field"><span>Default Etc. ($/unit)</span><InlineInput value={field(o.landedCost.defaultEtc)} onSave={(v) => saveLc('defaultEtc', v)} /></label>
-      </div>
-      <h4 className="subhead">Sign-up domains</h4>
-      <p className="muted small">People with these email domains can create their own account in your organization. Anyone else needs an invite.</p>
-      <div className="chips">
-        {o.allowedDomains.map((d) => (
-          <span key={d} className="chip chip--on">{d} <button className="chip__x" aria-label={`Remove ${d}`} onClick={() => setDomains(o.allowedDomains.filter((x) => x !== d))}>×</button></span>
-        ))}
-        <form className="row" onSubmit={(e) => { e.preventDefault(); if (domain.trim()) { setDomains([...o.allowedDomains, domain.trim().toLowerCase()]); setDomain(''); } }}>
-          <Input placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} />
-          <Button type="submit" size="sm">Add</Button>
-        </form>
       </div>
     </Card>
   );

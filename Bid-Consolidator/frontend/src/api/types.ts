@@ -9,7 +9,7 @@ export interface Org { id: number; name: string; branding: OrgBranding }
 export interface Session { token: string; user: User; org: Org }
 
 export interface LandedCostSettings { commissionDivisor: number; freightPerContainer: number; defaultEtc: number }
-export interface OrgSettings extends Org { allowedDomains: string[]; landedCost: LandedCostSettings }
+export interface OrgSettings extends Org { landedCost: LandedCostSettings }
 export interface Member { id: number; email: string; name: string; role: Role; createdAt: string }
 export interface Invite { id: number; email: string; role: Role; expiresAt: string; usedAt: string | null; createdAt: string; inviteUrl?: string }
 

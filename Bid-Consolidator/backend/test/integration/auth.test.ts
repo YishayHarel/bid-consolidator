@@ -1,16 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { anon, as, makeOrg, makeUser } from '../helpers.js';
+import { anon, as, makeInvite, makeOrg, makeUser, pool } from '../helpers.js';
 
-describe('sign-up is not open to the public', () => {
-  it('refuses emails outside every org\'s sign-up domains', async () => {
-    const res = await anon().post('/api/auth/register').send({ name: 'Stranger', email: 'x@gmail.com', password: 'long-enough-pw' });
-    expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/company email/i);
+describe('sign-up is invite-only', () => {
+  it('refuses sign-up without an invite, even at a domain the org uses', async () => {
+    const org = await makeOrg();
+    await makeUser(org); // someone already at this domain
+    for (const email of ['x@gmail.com', `new@${org.domain}`]) {
+      const res = await anon().post('/api/auth/register').send({ name: 'Stranger', email, password: 'long-enough-pw' });
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toMatch(/invite/i);
+    }
+    const legacyDomains = await pool.query(`UPDATE organizations SET allowed_domains = ARRAY[$2] WHERE id = $1`, [org.id, org.domain]);
+    expect(legacyDomains.rowCount).toBe(1); // a leftover sign-up domain in the DB grants nothing
+    const res = await anon().post('/api/auth/register').send({ name: 'S', email: `other@${org.domain}`, password: 'long-enough-pw' });
+    expect(res.status).toBe(400);
   });
 
-  it('accepts a company-domain email, joins that org as a member', async () => {
+  it('accepts an invite, joining that org with the invited role', async () => {
     const org = await makeOrg();
-    const res = await anon().post('/api/auth/register').send({ name: 'Emp', email: `emp@${org.domain}`, password: 'long-enough-pw' });
+    const email = `emp@${org.domain}`;
+    const inviteToken = await makeInvite(org, email);
+    const res = await anon().post('/api/auth/register').send({ name: 'Emp', email, password: 'long-enough-pw', inviteToken });
     expect(res.status).toBe(201);
     expect(res.body.user).toMatchObject({ role: 'member', orgId: org.id });
     expect(res.body.token).toBeTruthy();
@@ -18,9 +28,12 @@ describe('sign-up is not open to the public', () => {
 
   it('enforces password length and rejects duplicate accounts', async () => {
     const org = await makeOrg();
-    expect((await anon().post('/api/auth/register').send({ name: 'A', email: `a@${org.domain}`, password: 'short' })).status).toBe(400);
-    await anon().post('/api/auth/register').send({ name: 'A', email: `a@${org.domain}`, password: 'long-enough-pw' });
-    const dup = await anon().post('/api/auth/register').send({ name: 'A', email: `A@${org.domain}`, password: 'long-enough-pw' });
+    const email = `a@${org.domain}`;
+    const t1 = await makeInvite(org, email);
+    expect((await anon().post('/api/auth/register').send({ name: 'A', email, password: 'short', inviteToken: t1 })).status).toBe(400);
+    expect((await anon().post('/api/auth/register').send({ name: 'A', email, password: 'long-enough-pw', inviteToken: t1 })).status).toBe(201);
+    const t2 = await makeInvite(org, `A@${org.domain}`);
+    const dup = await anon().post('/api/auth/register').send({ name: 'A', email: `A@${org.domain}`, password: 'long-enough-pw', inviteToken: t2 });
     expect(dup.status).toBe(409);
   });
 

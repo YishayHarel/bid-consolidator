@@ -9,7 +9,6 @@ export function LoginPage() {
   const { status, signIn, notice } = useAuth();
   const [params] = useSearchParams();
   const inviteToken = params.get('invite') ?? undefined;
-  const [mode, setMode] = useState<'signin' | 'signup'>(inviteToken ? 'signup' : 'signin');
   const [name, setName] = useState('');
   const [email, setEmail] = useState(params.get('email') ?? '');
   const [password, setPassword] = useState('');
@@ -19,7 +18,8 @@ export function LoginPage() {
   const from = (useLocation().state as { from?: string } | null)?.from ?? '/app';
 
   if (status === 'signed-in') return <Navigate to={from} replace />;
-  const signup = mode === 'signup';
+  // Sign-up is invite-only: the create-account form exists only on an invite link.
+  const signup = !!inviteToken;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -27,7 +27,7 @@ export function LoginPage() {
     setBusy(true);
     try {
       const session = signup
-        ? await api.post<Session>('/auth/register', { name, email, password, ...(inviteToken ? { inviteToken } : {}) })
+        ? await api.post<Session>('/auth/register', { name, email, password, inviteToken })
         : await api.post<Session>('/auth/login', { email, password });
       signIn(session);
       navigate(from, { replace: true });
@@ -49,7 +49,7 @@ export function LoginPage() {
           </div>
         </div>
         <h1 className="auth__heading">
-          {signup ? (inviteToken ? 'Accept your invitation' : 'Create your account') : 'Sign in'}
+          {signup ? 'Accept your invitation' : 'Sign in'}
         </h1>
         {notice && !error && <div className="notice">{notice}</div>}
         {signup && (
@@ -69,15 +69,7 @@ export function LoginPage() {
         <Button type="submit" variant="primary" className="btn--block" busy={busy}>
           {signup ? 'Create account' : 'Sign in'}
         </Button>
-        {!inviteToken && (
-          <p className="auth__switch">
-            {signup ? 'Already have an account?' : 'New here?'}{' '}
-            <button type="button" className="link-btn" onClick={() => { setMode(signup ? 'signin' : 'signup'); setError(null); }}>
-              {signup ? 'Sign in' : 'Create an account'}
-            </button>
-          </p>
-        )}
-        {signup && !inviteToken && <p className="auth__fine">Sign-up is open to company email addresses. Everyone else needs an invite from an admin.</p>}
+        {!signup && <p className="auth__fine">New here? Ask an admin to invite you — accounts are by invitation only.</p>}
       </form>
     </div>
   );

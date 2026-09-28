@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { pool, queryOne, withTx } from '../../db/pool.js';
 import { badRequest, conflict, isUniqueViolation, notFound } from '../../lib/errors.js';
 import { enqueue, jobDTO } from '../../lib/jobs.js';
-import { extOf, UploadBatch } from '../../lib/storage.js';
+import { extOf, requestObjectDeletion, UploadBatch } from '../../lib/storage.js';
 import { cleanupUploads, uploadExcel } from '../../lib/uploads.js';
 import { id, nullableNumber, nullableText, parseBody, parseParams } from '../../lib/validate.js';
 import { divisionFormat } from '../../domain/divisions.js';
@@ -51,9 +51,14 @@ const landedInputs = {
 
 // Partial update: only fields present change. Saving notes can never wipe the
 // winner or landed-cost values (the old endpoint rewrote every column).
+// Placing a row on an item where the same factory already has a quote is a
+// 409, unless `replace` is set: then this row takes that spot (and its winner
+// flag), and the displaced quote moves to "rows to place" — nothing is lost.
 quotesRouter.patch('/quotes/:quoteId', async (req, res) => {
   const { quoteId } = parseParams(req, z.object({ quoteId: id }));
-  const body = parseBody(req, z.object({ notes: nullableText(5000).optional(), itemId: id.optional(), ...landedInputs }));
+  const body = parseBody(req, z.object({
+    notes: nullableText(5000).optional(), itemId: id.optional(), replace: z.boolean().optional(), ...landedInputs,
+  }));
   const p = currentProject(req);
   const existing = await quoteById(pool, p.id, quoteId);
   if (!existing) throw notFound('Quote');
@@ -79,10 +84,29 @@ quotesRouter.patch('/quotes/:quoteId', async (req, res) => {
     params.push(present, value);
     return `${col} = CASE WHEN $${params.length - 1} THEN $${params.length}${cast} ELSE ${col} END`;
   });
+  const moving = body.itemId !== undefined && body.itemId !== existing.item_id;
   try {
-    await pool.query(`UPDATE quotes SET ${assignments.join(', ')} WHERE id = $1 AND project_id = $2`, params);
+    await withTx(async (tx) => {
+      let inheritsWinner = false;
+      if (moving && body.replace) {
+        const displaced = await queryOne<{ was_winner: boolean }>(
+          tx,
+          `WITH d AS (SELECT id, is_selected_winner FROM quotes
+                       WHERE item_id = $1 AND project_factory_id = $2 AND id <> $3 FOR UPDATE)
+           UPDATE quotes q SET item_id = NULL, is_selected_winner = false FROM d WHERE q.id = d.id
+           RETURNING d.is_selected_winner AS was_winner`,
+          [body.itemId, existing.project_factory_id, quoteId],
+        );
+        inheritsWinner = !!displaced?.was_winner;
+      }
+      // A row that leaves its item can't stay that item's winner.
+      const winnerSql = moving ? `, is_selected_winner = ${inheritsWinner ? 'true' : 'false'}` : '';
+      await tx.query(`UPDATE quotes SET ${assignments.join(', ')}${winnerSql} WHERE id = $1 AND project_id = $2`, params);
+    });
   } catch (err) {
-    if (isUniqueViolation(err, 'quotes_item_factory_uidx')) throw conflict('This factory already has a quote on that item.');
+    if (isUniqueViolation(err, 'quotes_item_factory_uidx')) {
+      throw conflict('This factory already has a quote on that item.', { reason: 'factory_has_quote' });
+    }
     throw err;
   }
   res.json(quoteDTO((await quoteById(pool, p.id, quoteId))!));
@@ -106,10 +130,18 @@ quotesRouter.put('/items/:itemId/winner', async (req, res) => {
   res.json({ itemId, winnerQuoteId: quoteId });
 });
 
+// Dismiss a quote row for good (e.g. a duplicate left in "rows to place").
 quotesRouter.delete('/quotes/:quoteId', async (req, res) => {
   const { quoteId } = parseParams(req, z.object({ quoteId: id }));
-  const r = await pool.query('DELETE FROM quotes WHERE id = $1 AND project_id = $2', [quoteId, currentProject(req).id]);
-  if (!r.rowCount) throw notFound('Quote');
+  await withTx(async (tx) => {
+    const row = await queryOne<{ image_path: string | null }>(tx,
+      'DELETE FROM quotes WHERE id = $1 AND project_id = $2 RETURNING image_path', [quoteId, currentProject(req).id]);
+    if (!row) throw notFound('Quote');
+    if (row.image_path) {
+      const stillUsed = await queryOne(tx, 'SELECT 1 FROM quotes WHERE image_path = $1 LIMIT 1', [row.image_path]);
+      if (!stillUsed) await requestObjectDeletion(tx, [row.image_path]);
+    }
+  });
   res.status(204).end();
 });
 

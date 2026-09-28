@@ -29,7 +29,6 @@
         "SMTP_HOST": "",
         "DB_HOST": "/tmp",
         "DB_NAME": "bc_browser",
-        "ALLOWED_SIGNUP_DOMAINS": "shalomint.com,shalom.com",
         "FRONTEND_URL": "http://localhost:5173",
         "NODE_ENV": "development",
         "PORT": "4000"

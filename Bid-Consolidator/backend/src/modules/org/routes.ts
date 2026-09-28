@@ -1,6 +1,6 @@
 // Organization administration (admins only, except reading your own org):
-// settings (landed-cost constants, sign-up domains, branding), members & roles,
-// and invites.
+// settings (landed-cost constants, branding), members & roles, and invites.
+// Sign-up is invite-only, so invites are the only way new people join.
 import { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../../config.js';
@@ -17,7 +17,6 @@ orgRouter.use(requireAuth);
 
 const orgFull = (o: OrgRow) => ({
   ...orgDTO(o),
-  allowedDomains: o.allowed_domains,
   landedCost: effectiveSettings(o.settings, null),
 });
 
@@ -27,7 +26,6 @@ orgRouter.get('/', async (req, res) => {
   res.json(orgFull(org));
 });
 
-const domain = z.string().trim().toLowerCase().regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, 'must be a domain like example.com');
 orgRouter.patch('/', requireAdmin, async (req, res) => {
   const body = parseBody(req, z.object({
     name: z.string().trim().min(1).max(255).optional(),
@@ -37,7 +35,6 @@ orgRouter.patch('/', requireAdmin, async (req, res) => {
       subtitle: z.string().trim().max(255).optional(),
       color: z.string().regex(/^#[0-9a-f]{6}$/i, 'must be a hex color like #0f172a').optional(),
     }).optional(),
-    allowedDomains: z.array(domain).max(20).optional(),
     landedCost: z.object({
       commissionDivisor: z.number().positive().max(10).optional(),
       freightPerContainer: z.number().min(0).max(1_000_000).optional(),
@@ -51,12 +48,11 @@ orgRouter.patch('/', requireAdmin, async (req, res) => {
        name = COALESCE($2, name),
        logo_mark = COALESCE($3, logo_mark), logo_title = COALESCE($4, logo_title),
        logo_sub = COALESCE($5, logo_sub), brand_color = COALESCE($6, brand_color),
-       allowed_domains = COALESCE($7, allowed_domains),
-       settings = CASE WHEN $8::jsonb IS NULL THEN settings
-                       ELSE jsonb_set(settings, '{landedCost}', COALESCE(settings->'landedCost', '{}'::jsonb) || $8::jsonb) END
+       settings = CASE WHEN $7::jsonb IS NULL THEN settings
+                       ELSE jsonb_set(settings, '{landedCost}', COALESCE(settings->'landedCost', '{}'::jsonb) || $7::jsonb) END
      WHERE id = $1 RETURNING *`,
     [u.orgId, body.name ?? null, body.branding?.mark ?? null, body.branding?.title ?? null, body.branding?.subtitle ?? null,
-     body.branding?.color ?? null, body.allowedDomains ? [...new Set(body.allowedDomains)] : null,
+     body.branding?.color ?? null,
      body.landedCost ? JSON.stringify(body.landedCost) : null],
   );
   res.json(orgFull(org!));

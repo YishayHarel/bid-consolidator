@@ -7,6 +7,7 @@ import { afterAll } from 'vitest';
 import * as XLSX from 'xlsx';
 import { createApp } from '../src/app.js';
 import { pool, queryOne } from '../src/db/pool.js';
+import { newOpaqueToken } from '../src/lib/auth.js';
 import { drainJobs } from '../src/lib/jobs.js';
 import '../src/modules/jobs/handlers.js';
 
@@ -19,18 +20,28 @@ export const app = http.createServer(createApp()).listen(0);
 afterAll(() => new Promise<void>((resolve) => { app.closeAllConnections(); app.close(() => resolve()); }));
 export { pool, drainJobs };
 
-/** A fresh organization with its own sign-up domain (full isolation per test). */
+/** A fresh organization with its own email domain (full isolation per test). */
 export async function makeOrg(name = 'Org') {
   const domain = `${randomUUID().slice(0, 8)}.example-co.com`;
   const org = await queryOne<{ id: number }>(pool,
-    `INSERT INTO organizations (name, allowed_domains) VALUES ($1, ARRAY[$2]) RETURNING id`, [`${name} ${domain}`, domain]);
+    `INSERT INTO organizations (name) VALUES ($1) RETURNING id`, [`${name} ${domain}`]);
   return { id: org!.id, domain };
 }
 
-/** Register a user in an org (via the real sign-up endpoint). */
-export async function makeUser(org: { domain: string }, opts: { admin?: boolean; name?: string } = {}) {
+/** An unused invite into an org, returning the raw token (as an admin would share it). */
+export async function makeInvite(org: { id: number }, email: string, role: 'admin' | 'member' = 'member') {
+  const { token, hash } = newOpaqueToken();
+  await pool.query(
+    `INSERT INTO org_invites (org_id, email, role, token_hash, expires_at) VALUES ($1, $2, $3, $4, now() + interval '1 day')`,
+    [org.id, email, role, hash]);
+  return token;
+}
+
+/** Register a user in an org (via an invite and the real sign-up endpoint). */
+export async function makeUser(org: { id: number; domain: string }, opts: { admin?: boolean; name?: string } = {}) {
   const email = `${randomUUID().slice(0, 8)}@${org.domain}`;
-  const res = await request(app).post('/api/auth/register').send({ name: opts.name ?? 'Tester', email, password: 'correct-horse-battery' });
+  const inviteToken = await makeInvite(org, email);
+  const res = await request(app).post('/api/auth/register').send({ name: opts.name ?? 'Tester', email, password: 'correct-horse-battery', inviteToken });
   if (res.status !== 201) throw new Error(`register failed: ${res.status} ${JSON.stringify(res.body)}`);
   if (opts.admin) {
     await pool.query(`UPDATE users SET role = 'admin' WHERE id = $1`, [res.body.user.id]);

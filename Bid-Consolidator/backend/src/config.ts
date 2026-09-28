@@ -37,7 +37,6 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 random characters'),
   JWT_EXPIRES_IN: z.string().default('8h'),
   FILE_URL_SECRET: optionalString, // derived from JWT_SECRET when unset
-  ALLOWED_SIGNUP_DOMAINS: optionalString, // extra bootstrap domains for the default org
 
   // Web
   FRONTEND_URL: z.string().default('http://localhost:5173'), // comma-separated allowed origins
@@ -97,10 +96,6 @@ function load() {
     storageMode: env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY ? ('supabase' as const) : ('local' as const),
     smtpEnabled: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS),
     aiEnabled: !!env.GEMINI_API_KEY,
-    bootstrapSignupDomains: (env.ALLOWED_SIGNUP_DOMAINS ?? '')
-      .split(',')
-      .map((d) => d.trim().toLowerCase())
-      .filter(Boolean),
   };
 }
 

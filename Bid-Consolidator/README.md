@@ -50,8 +50,9 @@ npm install
 npm run dev
 ```
 
-First account: set `ALLOWED_SIGNUP_DOMAINS=yourcompany.com` in `backend/.env`,
-then sign up at http://localhost:5173/admin — or bootstrap an admin:
+First account: bootstrap an admin, then sign in at http://localhost:5173/admin.
+Sign-up is invite-only — everyone else joins through an invite link the admin
+creates in Settings → Members & invites.
 
 ```bash
 cd backend && SEED_ADMIN_EMAIL=you@yourcompany.com INTERNAL_PASSWORD='a-long-password' npm run seed

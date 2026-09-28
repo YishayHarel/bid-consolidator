@@ -99,10 +99,10 @@ export function useUpdateQuote(projectId: number) {
   const qc = useQueryClient();
   const inv = useInvalidate();
   return useMutation({
-    mutationFn: ({ quoteId, patch }: { quoteId: number; patch: Partial<LandedCostInputs> & { notes?: string | null; itemId?: number } }) =>
+    mutationFn: ({ quoteId, patch }: { quoteId: number; patch: Partial<LandedCostInputs> & { notes?: string | null; itemId?: number; replace?: boolean } }) =>
       api.patch<Quote>(`/projects/${projectId}/quotes/${quoteId}`, patch),
     onSuccess: (quote, vars) => {
-      if (vars.patch.itemId !== undefined) return inv(qk.compare(projectId), qk.landed(projectId));
+      if (vars.patch.itemId !== undefined) return inv(qk.compare(projectId), qk.landed(projectId), qk.project(projectId));
       qc.setQueryData<CompareSheet>(qk.compare(projectId), (s) => s && {
         ...s,
         items: s.items.map((i) => ({ ...i, quotes: i.quotes.map((q) => (q.id === quote.id ? quote : q)) })),
@@ -245,7 +245,7 @@ export const useOrgSettings = () => useQuery({ queryKey: qk.org, queryFn: () => 
 export function useUpdateOrg() {
   const inv = useInvalidate();
   return useMutation({
-    mutationFn: (body: { name?: string; allowedDomains?: string[]; landedCost?: Partial<LandedCostSettings>; branding?: Partial<OrgSettings['branding']> }) =>
+    mutationFn: (body: { name?: string; landedCost?: Partial<LandedCostSettings>; branding?: Partial<OrgSettings['branding']> }) =>
       api.patch<OrgSettings>('/org', body),
     onSuccess: () => inv(qk.org, qk.me),
   });

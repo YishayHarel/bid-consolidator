@@ -10,6 +10,8 @@ const password = z
   .min(8, 'must be at least 8 characters')
   .refine((p) => Buffer.byteLength(p) <= 72, 'must be 72 characters or fewer');
 
+const INVITE_ONLY = 'is required — sign-up is by invite only. Ask an admin for an invite link.';
+
 export const authRouter = Router();
 
 authRouter.post('/login', authLimiter, async (req, res) => {
@@ -22,7 +24,7 @@ authRouter.post('/register', authLimiter, async (req, res) => {
     name: z.string().trim().min(1, 'is required').max(120),
     email,
     password,
-    inviteToken: z.string().max(200).optional(),
+    inviteToken: z.string({ error: INVITE_ONLY }).min(1, INVITE_ONLY).max(200),
   }));
   res.status(201).json(await auth.register(body));
 });

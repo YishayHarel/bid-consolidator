@@ -1,4 +1,3 @@
-import { config } from '../../config.js';
 import { pool, queryOne, withTx } from '../../db/pool.js';
 import { DUMMY_HASH, hashPassword, sha256, signSession, verifyPassword, type Role, type SessionUser } from '../../lib/auth.js';
 import { badRequest, conflict, forbidden, isUniqueViolation, notFound, unauthorized } from '../../lib/errors.js';
@@ -38,41 +37,27 @@ export async function login(email: string, password: string) {
 }
 
 /**
- * Create an account. Allowed when either (a) a valid, unused invite for this
- * email is presented — the user joins the inviting org with the invited role —
- * or (b) the email's domain is one of an organization's sign-up domains.
- * Anyone else is refused: sign-up is not open to the public.
+ * Create an account. Sign-up is invite-only: an admin creates an invite for an
+ * exact email address and shares the link, and the person joins that org with
+ * the invited role. The invite token is the proof — nobody can join just by
+ * typing an address at a company domain.
  */
-export async function register(input: { name: string; email: string; password: string; inviteToken?: string | undefined }) {
-  const domain = input.email.split('@')[1] ?? '';
+export async function register(input: { name: string; email: string; password: string; inviteToken: string }) {
   return withTx(async (tx) => {
-    let orgId: number | null = null;
-    let role: Role = 'member';
-    if (input.inviteToken) {
-      const invite = await queryOne<{ id: number; org_id: number; email: string; role: Role }>(
-        tx,
-        `SELECT id, org_id, email, role FROM org_invites
-          WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now() FOR UPDATE`,
-        [sha256(input.inviteToken)],
-      );
-      if (!invite) throw badRequest('This invite link is invalid or has expired. Ask your admin for a new one.');
-      if (invite.email.toLowerCase() !== input.email) throw forbidden(`This invite is for ${invite.email}. Sign up with that address.`);
-      orgId = invite.org_id;
-      role = invite.role;
-      await tx.query('UPDATE org_invites SET used_at = now() WHERE id = $1', [invite.id]);
-    } else {
-      const org = await queryOne<{ id: number }>(tx, 'SELECT id FROM organizations WHERE $1 = ANY(allowed_domains) ORDER BY id LIMIT 1', [domain]);
-      if (org) orgId = org.id;
-      else if (config.bootstrapSignupDomains.includes(domain)) {
-        orgId = (await queryOne<{ id: number }>(tx, 'SELECT min(id) AS id FROM organizations'))?.id ?? null;
-      }
-      if (!orgId) throw forbidden('Sign-up is limited to company email addresses. Ask an admin to invite you.');
-    }
+    const invite = await queryOne<{ id: number; org_id: number; email: string; role: Role }>(
+      tx,
+      `SELECT id, org_id, email, role FROM org_invites
+        WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now() FOR UPDATE`,
+      [sha256(input.inviteToken)],
+    );
+    if (!invite) throw badRequest('This invite link is invalid or has expired. Ask your admin for a new one.');
+    if (invite.email.toLowerCase() !== input.email) throw forbidden(`This invite is for ${invite.email}. Sign up with that address.`);
+    await tx.query('UPDATE org_invites SET used_at = now() WHERE id = $1', [invite.id]);
     try {
       const user = await queryOne<UserRow>(
         tx,
         `INSERT INTO users (email, password, name, role, org_id) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [input.email, await hashPassword(input.password), input.name, role, orgId],
+        [input.email, await hashPassword(input.password), input.name, invite.role, invite.org_id],
       );
       return user!;
     } catch (err) {

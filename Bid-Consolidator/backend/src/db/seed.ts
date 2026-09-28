@@ -14,10 +14,6 @@ async function seed() {
   }
   await runMigrations('up');
   const org = await queryOne<{ id: number }>(pool, 'SELECT min(id) AS id FROM organizations');
-  const domain = email.split('@')[1]!;
-  await pool.query(
-    `UPDATE organizations SET allowed_domains = array(SELECT DISTINCT unnest(allowed_domains || ARRAY[$2]))
-      WHERE id = $1`, [org!.id, domain]);
   const row = await queryOne(pool,
     `INSERT INTO users (email, password, name, role, org_id) VALUES ($1, $2, $3, 'admin', $4)
      ON CONFLICT (email) DO NOTHING RETURNING id`,

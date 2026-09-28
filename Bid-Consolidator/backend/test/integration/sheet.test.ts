@@ -1,7 +1,7 @@
 // Building the compare sheet (manual, Excel, concurrency) and editing it
 // without losing data.
 import { describe, expect, it } from 'vitest';
-import { anon, as, drainJobs, invite, makeOrg, makeProject, makeUser, xlsx } from '../helpers.js';
+import { anon, as, drainJobs, invite, makeOrg, makeProject, makeUser, pool, xlsx } from '../helpers.js';
 
 async function setup() {
   const org = await makeOrg();
@@ -139,6 +139,42 @@ describe('compare sheet + winners + quote edits', () => {
     const other = (await api.post(`/api/projects/${p.id}/items`).send({ styleNum: 'H2' })).body;
     const q = (await api.get(`/api/projects/${p.id}/compare`)).body.items.find((i: { id: number }) => i.id === item.id).quotes[0];
     expect((await api.put(`/api/projects/${p.id}/items/${other.id}/winner`).send({ quoteId: q.id })).status).toBe(400);
+  });
+
+  // A factory's second row for an item it already has a quote on (e.g. a
+  // duplicate the v2 migration moved to "rows to place").
+  async function withDuplicate() {
+    const s = await withQuotes();
+    const kept = (await s.api.get(`/api/projects/${s.p.id}/compare`)).body.items[0].quotes[0];
+    const dup = await pool.query<{ id: number }>(
+      `INSERT INTO quotes (project_id, project_factory_id, price, description) VALUES ($1, $2, 2.5, 'dup row') RETURNING id`,
+      [s.p.id, kept.projectFactoryId]);
+    return { ...s, kept, dupId: dup.rows[0]!.id };
+  }
+
+  it('placing a duplicate on its item is a 409 unless replace is set; replace swaps and keeps the winner', async () => {
+    const { p, api, item, kept, dupId } = await withDuplicate();
+    await api.put(`/api/projects/${p.id}/items/${item.id}/winner`).send({ quoteId: kept.id });
+    const clash = await api.patch(`/api/projects/${p.id}/quotes/${dupId}`).send({ itemId: item.id });
+    expect(clash.status).toBe(409);
+    expect(clash.body.details).toEqual({ reason: 'factory_has_quote' });
+
+    const ok = await api.patch(`/api/projects/${p.id}/quotes/${dupId}`).send({ itemId: item.id, replace: true });
+    expect(ok.status).toBe(200);
+    const cmp = (await api.get(`/api/projects/${p.id}/compare`)).body;
+    const onItem = cmp.items[0].quotes.find((q: { projectFactoryId: number }) => q.projectFactoryId === kept.projectFactoryId);
+    expect(onItem).toMatchObject({ id: dupId, price: 2.5, isWinner: true });
+    expect(cmp.unmatched.map((q: { id: number }) => q.id)).toEqual([kept.id]); // displaced, not lost
+    expect(cmp.items[0].quotes.filter((q: { isWinner: boolean }) => q.isWinner)).toHaveLength(1);
+  });
+
+  it('dismissing a row to place deletes only that row', async () => {
+    const { p, api, dupId } = await withDuplicate();
+    expect((await api.delete(`/api/projects/${p.id}/quotes/${dupId}`)).status).toBe(204);
+    const cmp = (await api.get(`/api/projects/${p.id}/compare`)).body;
+    expect(cmp.unmatched).toHaveLength(0);
+    expect(cmp.items[0].quotes).toHaveLength(3);
+    expect((await api.delete(`/api/projects/${p.id}/quotes/${dupId}`)).status).toBe(404);
   });
 
   it('soft-deleted items (and their quotes) drop off the compare sheet', async () => {
